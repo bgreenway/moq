@@ -130,7 +130,7 @@ mod tests {
 		let decoded: TrackStatus = decode_message(&encoded, Version::Draft14).unwrap();
 
 		assert_eq!(decoded.request_id, RequestId(1));
-		assert_eq!(decoded.track_namespace.as_str(), "test/ns");
+		assert_eq!(decoded.track_namespace, "test/ns");
 		assert_eq!(decoded.track_name, "video");
 	}
 
@@ -146,7 +146,7 @@ mod tests {
 		let decoded: TrackStatus = decode_message(&encoded, Version::Draft15).unwrap();
 
 		assert_eq!(decoded.request_id, RequestId(1));
-		assert_eq!(decoded.track_namespace.as_str(), "test/ns");
+		assert_eq!(decoded.track_namespace, "test/ns");
 		assert_eq!(decoded.track_name, "video");
 	}
 
@@ -162,7 +162,7 @@ mod tests {
 		let decoded: TrackStatus = decode_message(&encoded, Version::Draft17).unwrap();
 
 		assert_eq!(decoded.request_id, RequestId(1));
-		assert_eq!(decoded.track_namespace.as_str(), "test/ns");
+		assert_eq!(decoded.track_namespace, "test/ns");
 		assert_eq!(decoded.track_name, "video");
 	}
 
@@ -178,7 +178,7 @@ mod tests {
 		let decoded: TrackStatus = decode_message(&encoded, Version::Draft16).unwrap();
 
 		assert_eq!(decoded.request_id, RequestId(1));
-		assert_eq!(decoded.track_namespace.as_str(), "test/ns");
+		assert_eq!(decoded.track_namespace, "test/ns");
 		assert_eq!(decoded.track_name, "video");
 	}
 
@@ -194,7 +194,7 @@ mod tests {
 		let decoded: TrackStatus = decode_message(&encoded, Version::Draft18).unwrap();
 
 		assert_eq!(decoded.request_id, RequestId(1));
-		assert_eq!(decoded.track_namespace.as_str(), "test/ns");
+		assert_eq!(decoded.track_namespace, "test/ns");
 		assert_eq!(decoded.track_name, "video");
 	}
 }

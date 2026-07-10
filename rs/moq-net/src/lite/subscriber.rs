@@ -176,9 +176,7 @@ impl<S: web_transport_trait::Session> Subscriber<S> {
 					let path = prefix.join(&suffix);
 					let abs = self.origin.as_ref().unwrap().absolute(&path).to_owned();
 					// Count every received name, even ones start_announce drops as loops.
-					self.stats
-						.broadcast(&abs)
-						.subscriber_announced_bytes(abs.as_str().len() as u64);
+					self.stats.broadcast(&abs).subscriber_announced_bytes(abs.len() as u64);
 					// Lite01/02 don't carry hop information; the broadcast starts with an empty chain.
 					if self.start_announce(path.clone(), crate::OriginList::new(), &mut producers)? {
 						stats_guards.insert(abs.clone(), self.stats.broadcast(&abs).subscriber());
@@ -197,9 +195,7 @@ impl<S: web_transport_trait::Session> Subscriber<S> {
 					let abs = self.origin.as_ref().unwrap().absolute(&path).to_owned();
 					// Count the broadcast name length (not the encoded message size) for
 					// every received announce, even ones start_announce drops as loops.
-					self.stats
-						.broadcast(&abs)
-						.subscriber_announced_bytes(abs.as_str().len() as u64);
+					self.stats.broadcast(&abs).subscriber_announced_bytes(abs.len() as u64);
 					if self.start_announce(path.clone(), hops, &mut producers)? {
 						stats_guards.insert(abs.clone(), self.stats.broadcast(&abs).subscriber());
 					}
@@ -209,9 +205,7 @@ impl<S: web_transport_trait::Session> Subscriber<S> {
 					tracing::debug!(broadcast = %self.log_path(&path), "unannounced");
 					let abs = self.origin.as_ref().unwrap().absolute(&path).to_owned();
 					// Count the unannounce name length whether or not a matching guard exists.
-					self.stats
-						.broadcast(&abs)
-						.subscriber_announced_bytes(abs.as_str().len() as u64);
+					self.stats.broadcast(&abs).subscriber_announced_bytes(abs.len() as u64);
 
 					// The matching Active may have been silently dropped by
 					// start_announce as a reflected loop, in which case

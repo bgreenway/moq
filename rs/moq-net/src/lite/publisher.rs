@@ -259,7 +259,7 @@ impl<S: web_transport_trait::Session> Publisher<S> {
 				for absolute in stats_guards.keys() {
 					stats
 						.broadcast(absolute)
-						.publisher_announced_bytes(absolute.as_str().len() as u64);
+						.publisher_announced_bytes(absolute.len() as u64);
 				}
 			}
 			_ => {
@@ -314,7 +314,7 @@ impl<S: web_transport_trait::Session> Publisher<S> {
 								let bs = stats.broadcast(&absolute);
 								// Count the broadcast name length, not the encoded message size, so
 								// stats don't penalize the broadcast for hop/framing overhead.
-								bs.publisher_announced_bytes(absolute.as_str().len() as u64);
+								bs.publisher_announced_bytes(absolute.len() as u64);
 								let prev = stats_guards.insert(absolute, bs.publisher());
 								debug_assert!(prev.is_none(), "origin announced a path that was already active");
 								let msg = lite::Announce::Active { suffix, hops };
@@ -326,7 +326,7 @@ impl<S: web_transport_trait::Session> Publisher<S> {
 								// message is sent even for announces we filtered out above.
 								stats
 									.broadcast(&absolute)
-									.publisher_announced_bytes(absolute.as_str().len() as u64);
+									.publisher_announced_bytes(absolute.len() as u64);
 								stats_guards.remove(&absolute);
 								// An ended announce doesn't need hops — the receiver matches on path only.
 								let msg = lite::Announce::Ended {

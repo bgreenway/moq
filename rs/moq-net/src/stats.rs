@@ -1145,7 +1145,7 @@ impl GroupPublisher {
 	/// Build + publish the broadcast for `group` on `origin`. Returns `None`
 	/// (with a warning) if track creation or the publish is rejected, so one bad
 	/// group doesn't tear down the whole aggregator.
-	fn create(origin: &OriginProducer, prefix: &Path, group: &Path, node: Option<&str>) -> Option<Self> {
+	fn create(origin: &OriginProducer, prefix: &Path, group: &Path, node: Option<&Path>) -> Option<Self> {
 		let mut broadcast = Broadcast::new().produce();
 
 		// Create the four per-broadcast tracks and the two session tracks up front.
@@ -1191,23 +1191,11 @@ impl GroupPublisher {
 /// The grouping key for `path`: its first `depth` `/`-separated segments (or the
 /// whole path if it has fewer). `depth == 0` yields the empty path, i.e. a
 /// single group carrying every broadcast.
-fn group_key(path: &str, depth: usize) -> PathOwned {
+fn group_key(path: &Path, depth: usize) -> PathOwned {
 	if depth == 0 {
 		return Path::empty().to_owned();
 	}
-	// Cut before the `depth`-th separator; fewer separators means take it all.
-	let mut seen = 0;
-	let mut end = path.len();
-	for (i, b) in path.bytes().enumerate() {
-		if b == b'/' {
-			seen += 1;
-			if seen == depth {
-				end = i;
-				break;
-			}
-		}
-	}
-	Path::new(&path[..end]).to_owned()
+	Path::from(path.parts().take(depth).collect::<Vec<_>>().join("/"))
 }
 
 async fn run_publisher(
@@ -1217,7 +1205,7 @@ async fn run_publisher(
 	depth: usize,
 	interval: Duration,
 ) {
-	let node = node.as_ref().map(|p| p.as_str());
+	let node = node.as_ref();
 
 	// One publisher per active group key. At depth 0 the sole (empty-key) group
 	// is created eagerly and never dropped, preserving the historical "single
@@ -1268,7 +1256,7 @@ async fn run_publisher(
 		let mut entries_by_group: GroupedEntries<'_> = HashMap::new();
 		for (path, entry) in &entries {
 			entries_by_group
-				.entry(group_key(path.as_str(), depth))
+				.entry(group_key(path, depth))
 				.or_default()
 				.push((path, entry));
 		}
@@ -1276,7 +1264,7 @@ async fn run_publisher(
 		for tier_idx in 0..2 {
 			for (root, counters) in &session_roots[tier_idx] {
 				roots_by_group[tier_idx]
-					.entry(group_key(root.as_str(), depth))
+					.entry(group_key(root, depth))
 					.or_default()
 					.push((root, counters));
 			}
@@ -1311,7 +1299,7 @@ async fn run_publisher(
 					for (i, (_track_name, counters, slot_state)) in snap_state.zip_slots(entry).into_iter().enumerate()
 					{
 						process_slot(counters, slot_state, |snap| {
-							frames[i].insert(path.as_str().to_string(), snap);
+							frames[i].insert(path.to_string(), snap);
 						});
 					}
 				}
@@ -1327,7 +1315,7 @@ async fn run_publisher(
 					for &(root, counters) in group_roots {
 						let state = gp.session_local[tier_idx].entry(root.clone()).or_default();
 						process_session_slot(counters, state, |snap| {
-							session_frames[tier_idx].insert(root.as_str().to_string(), snap);
+							session_frames[tier_idx].insert(root.to_string(), snap);
 						});
 					}
 				}
@@ -1404,22 +1392,16 @@ struct SessionSnapshot {
 	sessions_closed: u64,
 }
 
-fn advertised_path(prefix: &Path, group: &Path, node: Option<&str>) -> PathOwned {
+fn advertised_path(prefix: &Path, group: &Path, node: Option<&Path>) -> PathOwned {
 	// `<prefix>/<group>/node/<node>`. The `group` segment (empty at depth 0)
 	// buckets the output into one broadcast per group; the fixed `node` category
 	// leaves room for sibling categories (e.g. `<prefix>/<group>/cluster` for
 	// relay-mesh stats) under the same prefix.
-	let mut out = prefix.as_str().to_string();
-	if !group.is_empty() {
-		out.push('/');
-		out.push_str(group.as_str());
-	}
-	out.push_str("/node");
+	let mut out = prefix.join(group).join("node");
 	if let Some(node) = node {
-		out.push('/');
-		out.push_str(node);
+		out = out.join(node);
 	}
-	PathOwned::from(out)
+	out
 }
 
 #[cfg(test)]
@@ -1445,16 +1427,19 @@ mod tests {
 		let prefix = Path::new(".stats");
 		let none = Path::empty();
 		// Depth 0 (empty group) is byte-for-byte the historical layout.
-		assert_eq!(advertised_path(&prefix, &none, Some("sjc")).as_str(), ".stats/node/sjc");
 		assert_eq!(
-			advertised_path(&prefix, &none, Some("sjc/1")).as_str(),
+			advertised_path(&prefix, &none, Some(&Path::new("sjc"))),
+			".stats/node/sjc"
+		);
+		assert_eq!(
+			advertised_path(&prefix, &none, Some(&Path::new("sjc/1"))),
 			".stats/node/sjc/1"
 		);
-		assert_eq!(advertised_path(&prefix, &none, None).as_str(), ".stats/node");
+		assert_eq!(advertised_path(&prefix, &none, None), ".stats/node");
 
 		let prefix = Path::new("metrics");
 		assert_eq!(
-			advertised_path(&prefix, &none, Some("lon")).as_str(),
+			advertised_path(&prefix, &none, Some(&Path::new("lon"))),
 			"metrics/node/lon"
 		);
 
@@ -1462,24 +1447,24 @@ mod tests {
 		let prefix = Path::new(".stats");
 		let group = Path::new("acme");
 		assert_eq!(
-			advertised_path(&prefix, &group, Some("sjc")).as_str(),
+			advertised_path(&prefix, &group, Some(&Path::new("sjc"))),
 			".stats/acme/node/sjc"
 		);
-		assert_eq!(advertised_path(&prefix, &group, None).as_str(), ".stats/acme/node");
+		assert_eq!(advertised_path(&prefix, &group, None), ".stats/acme/node");
 	}
 
 	#[test]
 	fn group_key_takes_leading_segments() {
 		// Depth 0: everything shares the empty group.
-		assert_eq!(group_key("acme/foo/bar", 0).as_str(), "");
-		assert_eq!(group_key("", 0).as_str(), "");
+		assert_eq!(group_key(&Path::new("acme/foo/bar"), 0), "");
+		assert_eq!(group_key(&Path::new(""), 0), "");
 		// Depth 1: the first segment (the tenant/project).
-		assert_eq!(group_key("acme/foo/bar", 1).as_str(), "acme");
-		assert_eq!(group_key("acme", 1).as_str(), "acme");
+		assert_eq!(group_key(&Path::new("acme/foo/bar"), 1), "acme");
+		assert_eq!(group_key(&Path::new("acme"), 1), "acme");
 		// Depth 2: the first two segments.
-		assert_eq!(group_key("acme/foo/bar", 2).as_str(), "acme/foo");
+		assert_eq!(group_key(&Path::new("acme/foo/bar"), 2), "acme/foo");
 		// Fewer segments than the depth: take the whole path.
-		assert_eq!(group_key("acme", 2).as_str(), "acme");
+		assert_eq!(group_key(&Path::new("acme"), 2), "acme");
 	}
 
 	/// The advertised path normalizes a messy node suffix and drops an
@@ -1495,7 +1480,7 @@ mod tests {
 		let mut consumer = origin.consume();
 		tokio::time::advance(Duration::from_millis(1)).await;
 		let (path, _broadcast) = consumer.announced().await.expect("expected announce");
-		path.as_str().to_string()
+		path.to_string()
 	}
 
 	#[tokio::test(start_paused = true)]
@@ -1586,7 +1571,7 @@ mod tests {
 		tokio::time::advance(Duration::from_millis(1)).await;
 		let (path, broadcast) = consumer.announced().await.expect("expected announce");
 		assert!(broadcast.is_some());
-		assert_eq!(path.as_str(), ".stats/node/sjc/1");
+		assert_eq!(path, ".stats/node/sjc/1");
 	}
 
 	#[tokio::test(start_paused = true)]
@@ -1622,7 +1607,7 @@ mod tests {
 		for _ in 0..2 {
 			let (path, broadcast) = consumer.announced().await.expect("expected announce");
 			assert!(broadcast.is_some());
-			announced.push(path.as_str().to_string());
+			announced.push(path.to_string());
 		}
 		announced.sort();
 		assert_eq!(
@@ -1643,7 +1628,7 @@ mod tests {
 		tokio::time::advance(Duration::from_millis(1)).await;
 		let (path, broadcast) = consumer.announced().await.expect("expected announce");
 		assert!(broadcast.is_some());
-		assert_eq!(path.as_str(), ".stats/node");
+		assert_eq!(path, ".stats/node");
 	}
 
 	/// Drives the snapshot task forward by `count` ticks. In paused-time

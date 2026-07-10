@@ -228,7 +228,7 @@ mod tests {
 		let encoded = encode_message(&msg, Version::Draft14);
 		let decoded: PublishNamespace = decode_message(&encoded, Version::Draft14).unwrap();
 
-		assert_eq!(decoded.track_namespace.as_str(), "test/broadcast");
+		assert_eq!(decoded.track_namespace, "test/broadcast");
 	}
 
 	#[test]
@@ -256,7 +256,7 @@ mod tests {
 		let encoded = encode_message(&msg, Version::Draft14);
 		let decoded: PublishNamespaceDone = decode_message(&encoded, Version::Draft14).unwrap();
 
-		assert_eq!(decoded.track_namespace.as_str(), "old/stream");
+		assert_eq!(decoded.track_namespace, "old/stream");
 	}
 
 	#[test]
@@ -284,7 +284,7 @@ mod tests {
 		let encoded = encode_message(&msg, Version::Draft14);
 		let decoded: PublishNamespaceCancel = decode_message(&encoded, Version::Draft14).unwrap();
 
-		assert_eq!(decoded.track_namespace.as_str(), "canceled");
+		assert_eq!(decoded.track_namespace, "canceled");
 		assert_eq!(decoded.error_code, 1);
 		assert_eq!(decoded.reason_phrase, "Shutdown");
 	}
@@ -317,7 +317,7 @@ mod tests {
 		let decoded: PublishNamespace = decode_message(&encoded, Version::Draft17).unwrap();
 
 		assert_eq!(decoded.request_id, RequestId(5));
-		assert_eq!(decoded.track_namespace.as_str(), "v17/broadcast");
+		assert_eq!(decoded.track_namespace, "v17/broadcast");
 	}
 
 	#[test]
@@ -331,7 +331,7 @@ mod tests {
 		let decoded: PublishNamespace = decode_message(&encoded, Version::Draft18).unwrap();
 
 		assert_eq!(decoded.request_id, RequestId(5));
-		assert_eq!(decoded.track_namespace.as_str(), "v18/broadcast");
+		assert_eq!(decoded.track_namespace, "v18/broadcast");
 	}
 
 	#[test]

@@ -444,7 +444,7 @@ mod tests {
 		let decoded: Subscribe = decode_message(&encoded, Version::Draft14).unwrap();
 
 		assert_eq!(decoded.request_id, RequestId(1));
-		assert_eq!(decoded.track_namespace.as_str(), "test");
+		assert_eq!(decoded.track_namespace, "test");
 		assert_eq!(decoded.track_name, "video");
 		assert_eq!(decoded.subscriber_priority, 128);
 	}
@@ -464,7 +464,7 @@ mod tests {
 		let decoded: Subscribe = decode_message(&encoded, Version::Draft15).unwrap();
 
 		assert_eq!(decoded.request_id, RequestId(1));
-		assert_eq!(decoded.track_namespace.as_str(), "test");
+		assert_eq!(decoded.track_namespace, "test");
 		assert_eq!(decoded.track_name, "video");
 		assert_eq!(decoded.subscriber_priority, 128);
 	}
@@ -483,7 +483,7 @@ mod tests {
 		let encoded = encode_message(&msg, Version::Draft14);
 		let decoded: Subscribe = decode_message(&encoded, Version::Draft14).unwrap();
 
-		assert_eq!(decoded.track_namespace.as_str(), "conference/room123");
+		assert_eq!(decoded.track_namespace, "conference/room123");
 	}
 
 	#[test]
@@ -632,7 +632,7 @@ mod tests {
 		let decoded: Subscribe = decode_message(&encoded, Version::Draft17).unwrap();
 
 		assert_eq!(decoded.request_id, RequestId(1));
-		assert_eq!(decoded.track_namespace.as_str(), "test");
+		assert_eq!(decoded.track_namespace, "test");
 		assert_eq!(decoded.track_name, "video");
 		assert_eq!(decoded.subscriber_priority, 128);
 	}
@@ -686,7 +686,7 @@ mod tests {
 		let decoded: Subscribe = decode_message(&encoded, Version::Draft18).unwrap();
 
 		assert_eq!(decoded.request_id, RequestId(1));
-		assert_eq!(decoded.track_namespace.as_str(), "test");
+		assert_eq!(decoded.track_namespace, "test");
 		assert_eq!(decoded.track_name, "video");
 		assert_eq!(decoded.subscriber_priority, 128);
 	}

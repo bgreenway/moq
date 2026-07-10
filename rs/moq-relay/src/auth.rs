@@ -1075,11 +1075,7 @@ impl Auth {
 		let route_root = Path::new(route_root);
 		let claims_root = Path::new(&claims.root);
 		let depth = |path: &Path<'_>| {
-			if path.is_empty() {
-				0
-			} else {
-				path.as_str().split('/').count()
-			}
+			if path.is_empty() { 0 } else { path.part_count() }
 		};
 
 		if depth(&root) != depth(&route_root) {

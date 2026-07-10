@@ -260,8 +260,17 @@ fn route_key(name: &Path, hops: &OriginList) -> (usize, u64) {
 	const FNV_PRIME: u64 = 0x0000_0100_0000_01b3;
 
 	let mut hash = SEED;
-	for &byte in name.as_str().as_bytes() {
-		hash = (hash ^ u64::from(byte)).wrapping_mul(FNV_PRIME);
+	// Hash the parts with '/' separators, the same byte stream as the joined path,
+	// so nodes on older builds that hash the flat string still agree on the winner.
+	let mut first = true;
+	for part in name.parts() {
+		if !first {
+			hash = (hash ^ u64::from(b'/')).wrapping_mul(FNV_PRIME);
+		}
+		first = false;
+		for &byte in part.as_bytes() {
+			hash = (hash ^ u64::from(byte)).wrapping_mul(FNV_PRIME);
+		}
 	}
 	for hop in hops {
 		for &byte in &hop.id.to_le_bytes() {
@@ -1669,7 +1678,7 @@ mod tests {
 
 		// Create a producer with root "/foo"
 		let foo_producer = origin.with_root("foo").expect("should create root");
-		assert_eq!(foo_producer.root().as_str(), "foo");
+		assert_eq!(foo_producer.root(), "foo");
 
 		let mut consumer = origin.consume();
 
@@ -1691,7 +1700,7 @@ mod tests {
 		// Create nested roots
 		let foo_producer = origin.with_root("foo").expect("should create foo root");
 		let foo_bar_producer = foo_producer.with_root("bar").expect("should create bar root");
-		assert_eq!(foo_bar_producer.root().as_str(), "foo/bar");
+		assert_eq!(foo_bar_producer.root(), "foo/bar");
 
 		let mut consumer = origin.consume();
 
@@ -1883,7 +1892,7 @@ mod tests {
 		let allowed_root = limited_producer
 			.with_root("allowed")
 			.expect("should create allowed root");
-		assert_eq!(allowed_root.root().as_str(), "allowed");
+		assert_eq!(allowed_root.root(), "allowed");
 	}
 
 	#[tokio::test]
@@ -1900,7 +1909,7 @@ mod tests {
 
 		// Can create any root
 		let foo_producer = root_producer.with_root("foo").expect("should create any root");
-		assert_eq!(foo_producer.root().as_str(), "foo");
+		assert_eq!(foo_producer.root(), "foo");
 	}
 
 	#[tokio::test]

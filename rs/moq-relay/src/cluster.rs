@@ -612,7 +612,8 @@ impl Cluster {
 			tokio::select! {
 				ann = consumer.announced() => {
 					let Some((relative, announced)) = ann else { return; };
-					let peer = relative.as_str();
+					let peer = relative.to_string();
+					let peer = peer.as_str();
 					// Skip self and any peer we lose the tiebreaker to; that side
 					// dials us instead, so each pair forms a single session.
 					if !should_dial(&self_url, peer) {
@@ -1222,7 +1223,7 @@ mod tests {
 
 		// The self-registration broadcast must be visible on the origin.
 		let (path, broadcast) = watcher.try_announced().expect("self-registration must be published");
-		assert_eq!(path.as_str(), ".internal/origins/rendezvous.example.com:4443");
+		assert_eq!(path, ".internal/origins/rendezvous.example.com:4443");
 		assert!(broadcast.is_some());
 
 		// run() must NOT have returned: dropping the broadcast (via run returning)

@@ -239,7 +239,7 @@ async fn subscribe(
 			continue;
 		};
 
-		let path = path.as_str().to_string();
+		let path = path.to_string();
 		if own.contains(&path) || !seen.insert(path.clone()) {
 			continue;
 		}

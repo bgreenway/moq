@@ -464,9 +464,7 @@ impl<S: web_transport_trait::Session> Subscriber<S> {
 		// Count the broadcast name length per announce (not the encoded message
 		// size, so framing overhead isn't charged), keyed by path so it's
 		// independent of the lifetime guard below.
-		self.stats
-			.broadcast(&abs)
-			.subscriber_announced_bytes(abs.as_str().len() as u64);
+		self.stats.broadcast(&abs).subscriber_announced_bytes(abs.len() as u64);
 
 		let mut state = self.state.lock();
 		match state.broadcasts.entry(path.clone()) {
@@ -526,9 +524,7 @@ impl<S: web_transport_trait::Session> Subscriber<S> {
 
 		if count_bytes {
 			let abs = origin.absolute(&path).to_owned();
-			self.stats
-				.broadcast(&abs)
-				.subscriber_announced_bytes(abs.as_str().len() as u64);
+			self.stats.broadcast(&abs).subscriber_announced_bytes(abs.len() as u64);
 		}
 
 		let mut state = self.state.lock();

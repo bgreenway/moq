@@ -310,7 +310,7 @@ mod tests {
 		let decoded = SubscribeNamespace::decode_msg(&mut buf, Version::Draft18).unwrap();
 		assert!(buf.is_empty());
 		assert_eq!(decoded.request_id, RequestId(4));
-		assert_eq!(decoded.namespace.as_str(), "example/meeting");
+		assert_eq!(decoded.namespace, "example/meeting");
 	}
 
 	#[test]
@@ -325,7 +325,7 @@ mod tests {
 			let decoded = SubscribeNamespaceLegacy::decode_msg(&mut buf, version).unwrap();
 			assert!(buf.is_empty(), "trailing bytes for {version:?}");
 			assert_eq!(decoded.request_id, RequestId(4));
-			assert_eq!(decoded.namespace.as_str(), "example/meeting");
+			assert_eq!(decoded.namespace, "example/meeting");
 			assert_eq!(decoded.subscribe_options, 0x01);
 		}
 	}

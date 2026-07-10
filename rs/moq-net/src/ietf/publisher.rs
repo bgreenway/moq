@@ -534,7 +534,7 @@ impl<S: web_transport_trait::Session> Publisher<S> {
 				// Count the broadcast name length (not the encoded message size) as soon
 				// as the request is on the wire, so a rejected namespace still counts the
 				// announce we spent.
-				bs.publisher_announced_bytes(absolute.as_str().len() as u64);
+				bs.publisher_announced_bytes(absolute.len() as u64);
 
 				// Read response from stream.reader
 				let type_id: u64 = stream.reader.decode().await?;
@@ -585,7 +585,7 @@ impl<S: web_transport_trait::Session> Publisher<S> {
 					// measure the name, not the on-wire framing, so this is draft-agnostic).
 					self.stats
 						.broadcast(&absolute)
-						.publisher_announced_bytes(absolute.as_str().len() as u64);
+						.publisher_announced_bytes(absolute.len() as u64);
 					stream.writer.finish().ok();
 				}
 			}
@@ -608,7 +608,7 @@ impl<S: web_transport_trait::Session> Publisher<S> {
 			let absolute = self.origin.absolute(&suffix).to_owned();
 			self.stats
 				.broadcast(&absolute)
-				.publisher_announced_bytes(absolute.as_str().len() as u64);
+				.publisher_announced_bytes(absolute.len() as u64);
 			stream.writer.finish().ok();
 		}
 

@@ -68,14 +68,14 @@ mod tests {
 	fn empty_round_trip() {
 		let bytes = encode_ns("");
 		let decoded = decode_ns(&bytes);
-		assert_eq!(decoded.as_str(), "");
+		assert_eq!(decoded, "");
 	}
 
 	#[test]
 	fn single_part_round_trip() {
 		let bytes = encode_ns("test");
 		let decoded = decode_ns(&bytes);
-		assert_eq!(decoded.as_str(), "test");
+		assert_eq!(decoded, "test");
 	}
 
 	#[test]
@@ -88,7 +88,7 @@ mod tests {
 	fn multi_part_round_trip() {
 		let bytes = encode_ns("conference/room/123");
 		let decoded = decode_ns(&bytes);
-		assert_eq!(decoded.as_str(), "conference/room/123");
+		assert_eq!(decoded, "conference/room/123");
 	}
 
 	#[test]

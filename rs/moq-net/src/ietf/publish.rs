@@ -438,7 +438,7 @@ mod tests {
 		let decoded: Publish = decode_message(&encoded, Version::Draft14).unwrap();
 
 		assert_eq!(decoded.request_id, RequestId(1));
-		assert_eq!(decoded.track_namespace.as_str(), "test/ns");
+		assert_eq!(decoded.track_namespace, "test/ns");
 		assert_eq!(decoded.track_name, "video");
 		assert_eq!(decoded.track_alias, 42);
 		assert_eq!(decoded.largest_location, Some(Location { group: 10, object: 5 }));
@@ -461,7 +461,7 @@ mod tests {
 		let decoded: Publish = decode_message(&encoded, Version::Draft15).unwrap();
 
 		assert_eq!(decoded.request_id, RequestId(1));
-		assert_eq!(decoded.track_namespace.as_str(), "test/ns");
+		assert_eq!(decoded.track_namespace, "test/ns");
 		assert_eq!(decoded.track_name, "video");
 		assert_eq!(decoded.track_alias, 42);
 		assert_eq!(decoded.largest_location, Some(Location { group: 10, object: 5 }));
@@ -520,7 +520,7 @@ mod tests {
 		let decoded: Publish = decode_message(&encoded, Version::Draft17).unwrap();
 
 		assert_eq!(decoded.request_id, RequestId(1));
-		assert_eq!(decoded.track_namespace.as_str(), "test/ns");
+		assert_eq!(decoded.track_namespace, "test/ns");
 		assert_eq!(decoded.track_name, "video");
 		assert_eq!(decoded.track_alias, 42);
 		assert_eq!(decoded.largest_location, Some(Location { group: 10, object: 5 }));
@@ -579,7 +579,7 @@ mod tests {
 		let decoded: Publish = decode_message(&encoded, Version::Draft18).unwrap();
 
 		assert_eq!(decoded.request_id, RequestId(1));
-		assert_eq!(decoded.track_namespace.as_str(), "test/ns");
+		assert_eq!(decoded.track_namespace, "test/ns");
 		assert_eq!(decoded.track_name, "video");
 		assert_eq!(decoded.track_alias, 42);
 		assert_eq!(decoded.largest_location, Some(Location { group: 10, object: 5 }));
