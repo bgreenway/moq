@@ -45,7 +45,8 @@ func (b *BroadcastConsumer) FetchGroup(name string, sequence uint64, options *Fe
 // maxLatencyMs bounds buffering before a stalled group is skipped. subscription
 // tunes delivery (priority, ordering, group range); pass nil for defaults.
 func (b *BroadcastConsumer) SubscribeMedia(name string, container Container, maxLatencyMs uint64, subscription *Subscription) (*MediaConsumer, error) {
-	inner, err := b.inner.SubscribeMedia(name, container, maxLatencyMs, subscription)
+	config := &MediaConfig{MaxLatencyMs: maxLatencyMs}
+	inner, err := b.inner.SubscribeMedia(name, container, config, subscription)
 	if err != nil {
 		return nil, err
 	}

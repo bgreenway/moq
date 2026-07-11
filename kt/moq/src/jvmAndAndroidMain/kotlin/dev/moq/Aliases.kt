@@ -47,6 +47,7 @@ typealias Audio = uniffi.moq.MoqAudio
 typealias Dimensions = uniffi.moq.MoqDimensions
 typealias Subscription = uniffi.moq.MoqSubscription
 typealias FetchGroupOptions = uniffi.moq.MoqFetchGroupOptions
+typealias MediaConfig = uniffi.moq.MoqMediaConfig
 typealias TrackInfo = uniffi.moq.MoqTrackInfo
 typealias AudioFrame = uniffi.moq.MoqAudioFrame
 typealias AudioCodec = uniffi.moq.MoqAudioCodec

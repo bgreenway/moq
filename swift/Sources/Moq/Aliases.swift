@@ -21,6 +21,8 @@ public typealias Container = MoqFFI.Container
 public typealias Subscription = MoqFFI.MoqSubscription
 /// Options for fetching one complete group by sequence.
 public typealias FetchGroupOptions = MoqFFI.MoqFetchGroupOptions
+/// Decode-time options for a media subscription.
+public typealias MediaConfig = MoqFFI.MoqMediaConfig
 public typealias TrackInfo = MoqFFI.MoqTrackInfo
 
 /// A snapshot of connection statistics (RTT, bandwidth estimates, byte/packet

@@ -40,9 +40,10 @@ public final class BroadcastConsumer: Sendable {
         maxLatencyMs: UInt64,
         subscription: Subscription? = nil
     ) async throws -> MediaConsumer {
-        MediaConsumer(
+        let config = MediaConfig(maxLatencyMs: maxLatencyMs)
+        return MediaConsumer(
             try await ffi.subscribeMedia(
-                name: name, container: container, maxLatencyMs: maxLatencyMs, subscription: subscription))
+                name: name, container: container, config: config, subscription: subscription))
     }
 
     /// Subscribe to a raw-audio track, decoding to PCM in the layout `output`

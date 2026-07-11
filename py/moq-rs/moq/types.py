@@ -40,6 +40,9 @@ from moq_ffi import (
     MoqFrame as Frame,
 )
 from moq_ffi import (
+    MoqMediaConfig as MediaConfig,
+)
+from moq_ffi import (
     MoqSubscription as Subscription,
 )
 from moq_ffi import (
@@ -66,6 +69,7 @@ __all__ = [
     "Dimensions",
     "Frame",
     "FetchGroupOptions",
+    "MediaConfig",
     "Subscription",
     "TrackInfo",
     "Video",

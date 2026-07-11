@@ -46,6 +46,17 @@ impl From<MoqFetchGroupOptions> for moq_net::group::Fetch {
 	}
 }
 
+/// Decode-time options for a media subscription.
+///
+/// Construct with the fields you care about; the rest use their documented defaults.
+#[derive(Clone, uniffi::Record)]
+pub struct MoqMediaConfig {
+	/// Maximum buffering before a stalled group of pictures is skipped, in milliseconds.
+	/// Higher values tolerate more reordering at the cost of latency.
+	#[uniffi(default = 10000)]
+	pub max_latency_ms: u64,
+}
+
 impl From<MoqSubscription> for moq_net::Subscription {
 	fn from(s: MoqSubscription) -> Self {
 		moq_net::Subscription::default()
@@ -180,13 +191,13 @@ impl MoqBroadcastConsumer {
 	/// Subscribe to a track by name, delivering frames in decode order.
 	///
 	/// `container` is the track container from the catalog.
-	/// `max_latency_ms` controls the maximum buffering before skipping a GoP.
+	/// `config` tunes decoding (e.g. buffering before a stalled GoP is skipped); omit for defaults.
 	/// `subscription` tunes delivery (priority, ordering, group range); omit for defaults.
 	pub async fn subscribe_media(
 		&self,
 		name: String,
 		container: Container,
-		max_latency_ms: u64,
+		config: Option<MoqMediaConfig>,
 		subscription: Option<MoqSubscription>,
 	) -> Result<Arc<MoqMediaConsumer>, MoqError> {
 		// Parse the container before subscribing so we don't leave a dangling
@@ -197,6 +208,7 @@ impl MoqBroadcastConsumer {
 			.map_err(|e| MoqError::Codec(format!("invalid container: {e}")))?;
 		let subscription = subscription.map(moq_net::Subscription::from);
 		let track = self.inner.track(&name)?.subscribe(subscription).await?;
+		let max_latency_ms = config.map(|c| c.max_latency_ms).unwrap_or(10_000);
 		let latency = std::time::Duration::from_millis(max_latency_ms);
 		let consumer = moq_mux::container::Consumer::new(track, media).with_latency(latency);
 		Ok(Arc::new(MoqMediaConsumer {

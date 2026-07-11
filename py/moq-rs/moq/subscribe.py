@@ -19,6 +19,7 @@ from .types import (
     Container,
     FetchGroupOptions,
     Frame,
+    MediaConfig,
     Subscription,
     Video,
 )
@@ -240,7 +241,8 @@ class BroadcastConsumer:
         ``subscription`` tunes delivery (priority, ordering, group range); omit for defaults.
         """
         container = track if isinstance(track, Container) else track.container
-        return MediaConsumer(await self._inner.subscribe_media(name, container, max_latency_ms, subscription))
+        config = MediaConfig(max_latency_ms=max_latency_ms)
+        return MediaConsumer(await self._inner.subscribe_media(name, container, config, subscription))
 
     async def subscribe_audio(
         self,

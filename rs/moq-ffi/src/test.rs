@@ -301,7 +301,12 @@ async fn dynamic_track_request_can_publish_media() {
 		let consumer = consumer.clone();
 		tokio::spawn(async move {
 			consumer
-				.subscribe_media("requested-audio".into(), crate::media::Container::Legacy, 10_000, None)
+				.subscribe_media(
+					"requested-audio".into(),
+					crate::media::Container::Legacy,
+					Some(crate::consumer::MoqMediaConfig { max_latency_ms: 10_000 }),
+					None,
+				)
 				.await
 		})
 	};
@@ -457,7 +462,12 @@ async fn local_publish_consume_audio() {
 	assert!(catalog.video.is_empty());
 
 	let media_consumer = broadcast_consumer
-		.subscribe_media(track_name.clone(), audio.container.clone(), 10_000, None)
+		.subscribe_media(
+			track_name.clone(),
+			audio.container.clone(),
+			Some(crate::consumer::MoqMediaConfig { max_latency_ms: 10_000 }),
+			None,
+		)
 		.await
 		.unwrap();
 
@@ -513,7 +523,12 @@ async fn video_publish_consume() {
 	assert!(catalog.audio.is_empty());
 
 	let media_consumer = broadcast_consumer
-		.subscribe_media(track_name.clone(), video.container.clone(), 10_000, None)
+		.subscribe_media(
+			track_name.clone(),
+			video.container.clone(),
+			Some(crate::consumer::MoqMediaConfig { max_latency_ms: 10_000 }),
+			None,
+		)
 		.await
 		.unwrap();
 
@@ -556,7 +571,12 @@ async fn multiple_frames_ordering() {
 
 	let (track_name, audio) = catalog.audio.iter().next().unwrap();
 	let media_consumer = broadcast_consumer
-		.subscribe_media(track_name.clone(), audio.container.clone(), 10_000, None)
+		.subscribe_media(
+			track_name.clone(),
+			audio.container.clone(),
+			Some(crate::consumer::MoqMediaConfig { max_latency_ms: 10_000 }),
+			None,
+		)
 		.await
 		.unwrap();
 
@@ -749,7 +769,12 @@ async fn server_client_roundtrip() {
 		.expect("expected a catalog");
 	let (track_name, audio) = catalog.audio.iter().next().unwrap();
 	let media_consumer = bc
-		.subscribe_media(track_name.clone(), audio.container.clone(), 10_000, None)
+		.subscribe_media(
+			track_name.clone(),
+			audio.container.clone(),
+			Some(crate::consumer::MoqMediaConfig { max_latency_ms: 10_000 }),
+			None,
+		)
 		.await
 		.unwrap();
 
