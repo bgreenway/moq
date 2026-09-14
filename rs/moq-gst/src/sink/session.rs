@@ -57,7 +57,6 @@ pub enum ConnectionStatus {
 struct StatusInner {
 	status: ConnectionStatus,
 	version: Option<String>,
-	connections: u64,
 }
 
 /// Shared session status, read by the element's property getters and written by the session task.
@@ -71,9 +70,6 @@ impl Status {
 	/// re-reads `moq-version` sees the two consistent.
 	fn set(&self, status: ConnectionStatus, version: Option<String>) {
 		let mut inner = self.inner.lock().unwrap();
-		if status == ConnectionStatus::Connected && inner.status != ConnectionStatus::Connected {
-			inner.connections = inner.connections.saturating_add(1);
-		}
 		inner.status = status;
 		inner.version = version;
 	}
@@ -91,11 +87,6 @@ impl Status {
 	/// The negotiated MoQ version, or None when not connected.
 	pub fn version(&self) -> Option<String> {
 		self.inner.lock().unwrap().version.clone()
-	}
-
-	/// Number of successful connections during this element session.
-	pub fn connections(&self) -> u64 {
-		self.inner.lock().unwrap().connections
 	}
 }
 
@@ -333,6 +324,11 @@ impl Session {
 		self.connection_stats.stats().map(connection_stats_structure)
 	}
 
+	/// Number of successful connections recorded by the reconnect loop.
+	pub fn connection_count(&self) -> u64 {
+		self.connection_stats.connections()
+	}
+
 	/// Share this publication's completion with a pad's buffer path.
 	pub fn completion(&self) -> CompletionHandle {
 		self.completion.clone()
@@ -458,16 +454,6 @@ fn notify(element: &glib::WeakRef<Element>, props: &[&str]) {
 #[cfg(test)]
 mod tests {
 	use super::*;
-
-	#[test]
-	fn connection_count_counts_edges_not_duplicate_samples() {
-		let status = Status::default();
-		status.set(ConnectionStatus::Connected, Some("one".into()));
-		status.set(ConnectionStatus::Connected, Some("one".into()));
-		status.set(ConnectionStatus::Disconnected, None);
-		status.set(ConnectionStatus::Connected, Some("two".into()));
-		assert_eq!(status.connections(), 2);
-	}
 
 	#[test]
 	fn connection_stats_preserve_unavailable_separately_from_zero() {

@@ -58,7 +58,9 @@ reported as zero. Its possible `guint64` fields are `rtt-us`,
 `bytes-received`, `bytes-lost`, `packets-sent`, `packets-received`, and
 `packets-lost`. Poll the property for current counters; property notification
 marks connection and disconnection edges. `connect-count` counts successful
-connections during the current element session, so reconnect count is
+connections at the reconnect loop, including short-lived connections whose
+status transitions may be coalesced before an application polls them. The count
+is scoped to the current element session, so reconnect count is
 `max(connect-count - 1, 0)`.
 
 ## moqsrc

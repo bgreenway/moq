@@ -284,7 +284,7 @@ impl ObjectImpl for MoqSink {
 					"estimated-send-bitrate" => session.map(|s| s.send_bitrate()).unwrap_or(0).to_value(),
 					"estimated-recv-bitrate" => session.map(|s| s.recv_bitrate()).unwrap_or(0).to_value(),
 					"connection-stats" => session.and_then(Session::connection_stats).to_value(),
-					"connect-count" => session.map(|s| s.status().connections()).unwrap_or(0).to_value(),
+					"connect-count" => session.map(Session::connection_count).unwrap_or(0).to_value(),
 					_ => unreachable!(),
 				}
 			}
@@ -616,6 +616,18 @@ impl MoqSink {
 				.collect::<Vec<_>>();
 			(state, updates, failure)
 		};
+		notify(
+			&self.obj().downgrade(),
+			&[
+				"status",
+				"connected",
+				"moq-version",
+				"estimated-send-bitrate",
+				"estimated-recv-bitrate",
+				"connection-stats",
+				"connect-count",
+			],
+		);
 		let _rt = RUNTIME.enter();
 		if let Some(mut catalog) = state.catalog.take()
 			&& let Err(err) = catalog.finish().context("finalize catalog")

@@ -138,6 +138,9 @@ pub enum Status {
 struct State {
 	/// Current connection status, or `None` before the first connect.
 	status: Option<Status>,
+	/// Successful connections observed by the reconnect loop, including short-lived connections whose
+	/// status transitions may be coalesced before a consumer polls them.
+	connections: u64,
 	/// The negotiated MoQ version of the live session, or `None` when disconnected.
 	version: Option<Version>,
 	/// Set when the reconnect loop permanently gives up: the backoff timeout expiring, or a server
@@ -167,6 +170,11 @@ pub struct ConnectionStatsReader {
 }
 
 impl ConnectionStatsReader {
+	/// Number of successful connections observed by this reconnect loop.
+	pub fn connections(&self) -> u64 {
+		self.state.read().connections
+	}
+
 	/// Snapshot the current connection's stats, or `None` if not currently connected.
 	pub fn stats(&self) -> Option<moq_net::ConnectionStats> {
 		self.state.read().session.as_ref().map(moq_net::Session::stats)
@@ -263,6 +271,7 @@ impl Reconnect {
 				Ok(session) => {
 					tracing::info!(url = %url_log, "connected");
 					if let Ok(mut state) = state.write() {
+						state.connections = state.connections.saturating_add(1);
 						state.status = Some(Status::Connected);
 						state.version = Some(session.version());
 						state.session = Some(session.clone());
@@ -526,8 +535,14 @@ mod tests {
 		let reader = ConnectionStatsReader {
 			state: producer.consume(),
 		};
+		assert_eq!(reader.connections(), 0);
 		assert!(reader.snapshot().is_none());
-		producer.write().ok().unwrap().session = Some(session);
+		{
+			let mut state = producer.write().ok().unwrap();
+			state.connections = 2;
+			state.session = Some(session);
+		}
+		assert_eq!(reader.connections(), 2);
 		// The snapshot must read the protocol from that same session, without a second state query.
 		assert_eq!(reader.snapshot().unwrap().version, version);
 		producer.write().ok().unwrap().session = None;
