@@ -585,12 +585,12 @@ mod tests {
 			last_connections: 0,
 		};
 		{
-			let mut state = producer.write().unwrap();
+			let mut state = producer.write().ok().unwrap();
 			state.connections = 1;
 			state.status = Some(Status::Connected);
 		}
 		{
-			let mut state = producer.write().unwrap();
+			let mut state = producer.write().ok().unwrap();
 			state.connections = 2;
 			state.status = Some(Status::Disconnected);
 		}
