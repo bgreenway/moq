@@ -113,6 +113,14 @@ fn connection_stats_structure(stats: moq_net::ConnectionStats) -> gst::Structure
 	structure
 }
 
+/// One coherent readout of both presence counters, so `started - ended` never mixes two samples.
+pub(super) fn sessions_structure(presence: moq_net::stats::Presence) -> gst::Structure {
+	gst::Structure::builder("moq-sessions")
+		.field("started", presence.sessions)
+		.field("ended", presence.sessions_closed)
+		.build()
+}
+
 /// The connection settings, validated out of the GObject properties.
 #[derive(Clone)]
 pub struct ResolvedSettings {
@@ -355,9 +363,8 @@ impl Drop for Session {
 /// status/version into the `Status` the getters read, and watches the persistent bandwidth consumers
 /// only to `notify` the bitrate properties (the getters read the estimates directly). Each source is
 /// notified on its own change: a status edge notifies `status`/`connected`/`moq-version` together, a
-/// presence change notifies `sessions-started`/`sessions-ended` and `connection-stats`, and a bitrate change
-/// notifies just that bitrate.
-/// The loop stops only on a terminal error (a non-retryable auth failure, or a bounded backoff's
+/// presence change notifies `sessions` and `connection-stats`, and a bitrate change notifies just that
+/// bitrate. The loop stops only on a terminal error (a non-retryable auth failure, or a bounded backoff's
 /// give-up), which the `Err` arm posts as a bus error.
 /// [`Session`]'s `Drop` aborts this task, which drops the `Reconnect` handle and quietly tears the loop
 /// down.
@@ -422,10 +429,7 @@ async fn forward_registered(
 					// dead session; losing that race means it already ended, so there is nothing to report.
 					let won = completion.fail();
 					status.set(ConnectionStatus::Failed, None);
-					notify(
-						&element,
-						&["status", "connected", "moq-version", "connection-stats", "sessions-started", "sessions-ended"],
-					);
+					notify(&element, &["status", "connected", "moq-version", "connection-stats", "sessions"]);
 					if won && let Some(obj) = element.upgrade() {
 						obj.imp().post_session_error(&completion, format!("{err:?}"));
 					}
@@ -450,7 +454,7 @@ async fn forward_registered(
 					// Connected) never wakes the status arm above, so refresh the cached version
 					// here or moq-version would keep the previous session's value.
 					status.set(status.status(), reconnect.version().map(|v| v.to_string()));
-					notify(&element, &["sessions-started", "sessions-ended", "connection-stats", "moq-version"]);
+					notify(&element, &["sessions", "connection-stats", "moq-version"]);
 				}
 				Err(_) => return,
 			},
@@ -484,6 +488,18 @@ mod tests {
 		assert_eq!(structure.get::<u64>("bytes-sent"), Ok(0));
 		assert_eq!(structure.get::<u64>("packets-lost"), Ok(7));
 		assert!(!structure.has_field("bytes-received"));
+	}
+
+	#[test]
+	fn sessions_structure_reads_both_counters_together() {
+		gst::init().unwrap();
+		let mut presence = moq_net::stats::Presence::default();
+		presence.sessions = 3;
+		presence.sessions_closed = 2;
+		let structure = sessions_structure(presence);
+		assert_eq!(structure.name(), "moq-sessions");
+		assert_eq!(structure.get::<u64>("started"), Ok(3));
+		assert_eq!(structure.get::<u64>("ended"), Ok(2));
 	}
 
 	#[tokio::test]

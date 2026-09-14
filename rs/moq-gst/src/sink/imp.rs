@@ -23,7 +23,7 @@ use super::pad::{CapsOutcome, ProducerOptions, PushOutcome, caps_supported};
 use super::request_pad::{MoqSinkPad, Notifications};
 use super::session::{
 	CAT, Completion, CompletionHandle, ConnectionStatus, RUNTIME, ResolvedSettings, Session, SessionRegistration,
-	notify,
+	notify, sessions_structure,
 };
 
 #[derive(Debug, Clone, Default)]
@@ -227,14 +227,9 @@ impl ObjectImpl for MoqSink {
 					.blurb("Current optional transport statistics, null while disconnected")
 					.read_only()
 					.build(),
-				glib::ParamSpecUInt64::builder("sessions-started")
-					.nick("Sessions started")
-					.blurb("Cumulative successful connections during this element session")
-					.read_only()
-					.build(),
-				glib::ParamSpecUInt64::builder("sessions-ended")
-					.nick("Sessions ended")
-					.blurb("Cumulative disconnects during this element session")
+				glib::ParamSpecBoxed::builder::<gst::Structure>("sessions")
+					.nick("Sessions")
+					.blurb("Cumulative connects and disconnects during this element session")
 					.read_only()
 					.build(),
 			]
@@ -280,8 +275,7 @@ impl ObjectImpl for MoqSink {
 			| "estimated-send-bitrate"
 			| "estimated-recv-bitrate"
 			| "connection-stats"
-			| "sessions-started"
-			| "sessions-ended" => {
+			| "sessions" => {
 				let control = self.control.lock().unwrap();
 				let session = control.live.as_ref().map(|s| &s.session);
 				match pspec.name() {
@@ -291,8 +285,7 @@ impl ObjectImpl for MoqSink {
 					"estimated-send-bitrate" => session.map(|s| s.send_bitrate()).unwrap_or(0).to_value(),
 					"estimated-recv-bitrate" => session.map(|s| s.recv_bitrate()).unwrap_or(0).to_value(),
 					"connection-stats" => session.and_then(Session::connection_stats).to_value(),
-					"sessions-started" => session.map(|s| s.presence().sessions).unwrap_or(0).to_value(),
-					"sessions-ended" => session.map(|s| s.presence().sessions_closed).unwrap_or(0).to_value(),
+					"sessions" => sessions_structure(session.map(Session::presence).unwrap_or_default()).to_value(),
 					_ => unreachable!(),
 				}
 			}
@@ -633,8 +626,7 @@ impl MoqSink {
 				"estimated-send-bitrate",
 				"estimated-recv-bitrate",
 				"connection-stats",
-				"sessions-started",
-				"sessions-ended",
+				"sessions",
 			],
 		);
 		let _rt = RUNTIME.enter();
@@ -1460,8 +1452,7 @@ mod tests {
 			"estimated-send-bitrate",
 			"estimated-recv-bitrate",
 			"connection-stats",
-			"sessions-started",
-			"sessions-ended",
+			"sessions",
 		] {
 			assert!(
 				!spec(&sink, name).flags().contains(glib::ParamFlags::WRITABLE),
@@ -1469,8 +1460,9 @@ mod tests {
 			);
 		}
 		assert!(sink.property::<Option<gst::Structure>>("connection-stats").is_none());
-		assert_eq!(sink.property::<u64>("sessions-started"), 0);
-		assert_eq!(sink.property::<u64>("sessions-ended"), 0);
+		let sessions = sink.property::<gst::Structure>("sessions");
+		assert_eq!(sessions.get::<u64>("started"), Ok(0));
+		assert_eq!(sessions.get::<u64>("ended"), Ok(0));
 	}
 
 	#[test]
