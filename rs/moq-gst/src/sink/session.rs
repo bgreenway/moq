@@ -467,6 +467,7 @@ mod tests {
 
 	#[test]
 	fn connection_stats_preserve_unavailable_separately_from_zero() {
+		gst::init().unwrap();
 		let mut stats = moq_net::ConnectionStats::default();
 		stats.rtt = Some(std::time::Duration::ZERO);
 		stats.bytes_sent = Some(0);
