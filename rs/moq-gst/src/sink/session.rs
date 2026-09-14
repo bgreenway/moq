@@ -354,8 +354,9 @@ impl Drop for Session {
 /// status/version into the `Status` the getters read, and watches the persistent bandwidth consumers
 /// only to `notify` the bitrate properties (the getters read the estimates directly). Each source is
 /// notified on its own change: a status edge notifies `status`/`connected`/`moq-version` together, a
-/// bitrate change notifies just that bitrate. The loop stops only on a terminal error (a non-retryable
-/// auth failure, or a bounded backoff's give-up), which the `Err` arm posts as a bus error.
+/// connection-count change notifies `connect-count`, and a bitrate change notifies just that bitrate.
+/// The loop stops only on a terminal error (a non-retryable auth failure, or a bounded backoff's
+/// give-up), which the `Err` arm posts as a bus error.
 /// [`Session`]'s `Drop` aborts this task, which drops the `Reconnect` handle and quietly tears the loop
 /// down.
 async fn forward(
@@ -391,6 +392,7 @@ async fn forward_registered(
 	// Persistent across reconnects; watched only to fire property notifications.
 	let mut send_bandwidth = reconnect.send_bandwidth();
 	let mut recv_bandwidth = reconnect.recv_bandwidth();
+	let mut connection_stats = reconnect.stats();
 
 	loop {
 		tokio::select! {
@@ -410,7 +412,7 @@ async fn forward_registered(
 						moq_native::Status::Disconnected => gst::warning!(CAT, "session disconnected, reconnecting"),
 						_ => {}
 					}
-					notify(&element, &["status", "connected", "moq-version", "connection-stats", "connect-count"]);
+					notify(&element, &["status", "connected", "moq-version", "connection-stats"]);
 				}
 				Err(err) => {
 					// The reconnect loop stopped on a terminal error (a non-retryable auth failure, or a
@@ -418,7 +420,7 @@ async fn forward_registered(
 					// dead session; losing that race means it already ended, so there is nothing to report.
 					let won = completion.fail();
 					status.set(ConnectionStatus::Failed, None);
-					notify(&element, &["status", "connected", "moq-version", "connection-stats", "connect-count"]);
+					notify(&element, &["status", "connected", "moq-version", "connection-stats"]);
 					if won && let Some(obj) = element.upgrade() {
 						obj.imp().post_session_error(&completion, format!("{err:?}"));
 					}
@@ -435,6 +437,10 @@ async fn forward_registered(
 				},
 				result = recv_bandwidth.changed() => match result {
 					Ok(_) => notify(&element, &["estimated-recv-bitrate"]),
+					Err(_) => return,
+				},
+				result = connection_stats.connections_changed() => match result {
+					Ok(_) => notify(&element, &["connect-count"]),
 					Err(_) => return,
 				},
 		}

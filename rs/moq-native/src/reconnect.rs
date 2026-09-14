@@ -167,12 +167,37 @@ pub struct ConnectionSnapshot {
 #[derive(Clone)]
 pub struct ConnectionStatsReader {
 	state: kio::Consumer<State>,
+	last_connections: u64,
 }
 
 impl ConnectionStatsReader {
 	/// Number of successful connections observed by this reconnect loop.
 	pub fn connections(&self) -> u64 {
 		self.state.read().connections
+	}
+
+	/// Poll until the successful connection count changes.
+	pub fn poll_connections(&mut self, waiter: &kio::Waiter) -> Poll<crate::Result<u64>> {
+		let last = self.last_connections;
+		match self.state.poll(waiter, |state| {
+			if state.connections != last {
+				Poll::Ready(state.connections)
+			} else {
+				Poll::Pending
+			}
+		}) {
+			Poll::Ready(Ok(connections)) => {
+				self.last_connections = connections;
+				Poll::Ready(Ok(connections))
+			}
+			Poll::Ready(Err(state)) => Poll::Ready(Err(terminal(&state))),
+			Poll::Pending => Poll::Pending,
+		}
+	}
+
+	/// Wait until the successful connection count changes.
+	pub async fn connections_changed(&mut self) -> crate::Result<u64> {
+		kio::wait(|waiter| self.poll_connections(waiter)).await
 	}
 
 	/// Snapshot the current connection's stats, or `None` if not currently connected.
@@ -435,6 +460,7 @@ impl Reconnect {
 	pub fn stats(&self) -> ConnectionStatsReader {
 		ConnectionStatsReader {
 			state: self.state.clone(),
+			last_connections: 0,
 		}
 	}
 }
@@ -534,6 +560,7 @@ mod tests {
 		let producer = kio::Producer::<State>::default();
 		let reader = ConnectionStatsReader {
 			state: producer.consume(),
+			last_connections: 0,
 		};
 		assert_eq!(reader.connections(), 0);
 		assert!(reader.snapshot().is_none());
@@ -548,6 +575,26 @@ mod tests {
 		producer.write().ok().unwrap().session = None;
 		assert!(reader.snapshot().is_none());
 		drop(accepted);
+	}
+
+	#[tokio::test]
+	async fn connection_count_change_survives_coalesced_status() {
+		let producer = kio::Producer::<State>::default();
+		let mut reader = ConnectionStatsReader {
+			state: producer.consume(),
+			last_connections: 0,
+		};
+		{
+			let mut state = producer.write().unwrap();
+			state.connections = 1;
+			state.status = Some(Status::Connected);
+		}
+		{
+			let mut state = producer.write().unwrap();
+			state.connections = 2;
+			state.status = Some(Status::Disconnected);
+		}
+		assert_eq!(reader.connections_changed().await.unwrap(), 2);
 	}
 
 	/// The retry loop is `delay = min(delay * multiplier, max)`, so a zero anywhere
