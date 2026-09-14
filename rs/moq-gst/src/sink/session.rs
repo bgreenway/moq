@@ -444,10 +444,16 @@ async fn forward_registered(
 					Ok(_) => notify(&element, &["estimated-recv-bitrate"]),
 					Err(_) => return,
 				},
-				result = connection_stats.presence_changed() => match result {
-					Ok(_) => notify(&element, &["sessions-started", "sessions-ended", "connection-stats"]),
-					Err(_) => return,
-				},
+			result = connection_stats.presence_changed() => match result {
+				Ok(_) => {
+					// A flap that lands back on the reported status (Connected -> Disconnected ->
+					// Connected) never wakes the status arm above, so refresh the cached version
+					// here or moq-version would keep the previous session's value.
+					status.set(status.status(), reconnect.version().map(|v| v.to_string()));
+					notify(&element, &["sessions-started", "sessions-ended", "connection-stats", "moq-version"]);
+				}
+				Err(_) => return,
+			},
 		}
 	}
 }
