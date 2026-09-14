@@ -355,7 +355,8 @@ impl Drop for Session {
 /// status/version into the `Status` the getters read, and watches the persistent bandwidth consumers
 /// only to `notify` the bitrate properties (the getters read the estimates directly). Each source is
 /// notified on its own change: a status edge notifies `status`/`connected`/`moq-version` together, a
-/// connection-count change notifies `connect-count`, and a bitrate change notifies just that bitrate.
+/// connection-count change notifies `connect-count` and `connection-stats`, and a bitrate change
+/// notifies just that bitrate.
 /// The loop stops only on a terminal error (a non-retryable auth failure, or a bounded backoff's
 /// give-up), which the `Err` arm posts as a bus error.
 /// [`Session`]'s `Drop` aborts this task, which drops the `Reconnect` handle and quietly tears the loop
@@ -444,7 +445,7 @@ async fn forward_registered(
 					Err(_) => return,
 				},
 				result = connection_stats.connections_changed() => match result {
-					Ok(_) => notify(&element, &["connect-count"]),
+					Ok(_) => notify(&element, &["connect-count", "connection-stats"]),
 					Err(_) => return,
 				},
 		}
