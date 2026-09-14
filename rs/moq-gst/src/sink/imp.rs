@@ -23,6 +23,7 @@ use super::pad::{CapsOutcome, ProducerOptions, PushOutcome, caps_supported};
 use super::request_pad::{MoqSinkPad, Notifications};
 use super::session::{
 	CAT, Completion, CompletionHandle, ConnectionStatus, RUNTIME, ResolvedSettings, Session, SessionRegistration,
+	notify,
 };
 
 #[derive(Debug, Clone, Default)]

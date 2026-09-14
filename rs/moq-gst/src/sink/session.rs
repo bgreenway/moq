@@ -90,6 +90,7 @@ impl Status {
 	}
 }
 
+/// Convert only transport metrics actually supplied by the active backend into the public property.
 fn connection_stats_structure(stats: moq_net::ConnectionStats) -> gst::Structure {
 	let mut structure = gst::Structure::new_empty("moq-connection-stats");
 	if let Some(rtt) = stats.rtt {
@@ -420,7 +421,10 @@ async fn forward_registered(
 					// dead session; losing that race means it already ended, so there is nothing to report.
 					let won = completion.fail();
 					status.set(ConnectionStatus::Failed, None);
-					notify(&element, &["status", "connected", "moq-version", "connection-stats"]);
+					notify(
+						&element,
+						&["status", "connected", "moq-version", "connection-stats", "connect-count"],
+					);
 					if won && let Some(obj) = element.upgrade() {
 						obj.imp().post_session_error(&completion, format!("{err:?}"));
 					}
@@ -449,7 +453,7 @@ async fn forward_registered(
 
 /// Emit a GObject `notify` for each named property, on the connect/disconnect/bitrate edges, never per
 /// sample.
-fn notify(element: &glib::WeakRef<Element>, props: &[&str]) {
+pub(super) fn notify(element: &glib::WeakRef<Element>, props: &[&str]) {
 	if let Some(obj) = element.upgrade() {
 		for prop in props {
 			obj.notify(prop);
