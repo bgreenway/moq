@@ -97,8 +97,8 @@ fn connection_stats_structure(stats: moq_net::ConnectionStats) -> gst::Structure
 		structure.set("rtt-us", u64::try_from(rtt.as_micros()).unwrap_or(u64::MAX));
 	}
 	for (name, value) in [
-		("estimated-send-bitrate-bps", stats.estimated_send_rate),
-		("estimated-recv-bitrate-bps", stats.estimated_recv_rate),
+		("estimated-send-rate-bps", stats.estimated_send_rate),
+		("estimated-recv-rate-bps", stats.estimated_recv_rate),
 		("bytes-sent", stats.bytes_sent),
 		("bytes-received", stats.bytes_received),
 		("bytes-lost", stats.bytes_lost),
@@ -325,9 +325,9 @@ impl Session {
 		self.connection_stats.stats().map(connection_stats_structure)
 	}
 
-	/// Number of successful connections recorded by the reconnect loop.
-	pub fn connection_count(&self) -> u64 {
-		self.connection_stats.connections()
+	/// Cumulative connects and disconnects recorded by the reconnect loop.
+	pub fn presence(&self) -> moq_net::stats::Presence {
+		self.connection_stats.presence()
 	}
 
 	/// Share this publication's completion with a pad's buffer path.
@@ -355,7 +355,7 @@ impl Drop for Session {
 /// status/version into the `Status` the getters read, and watches the persistent bandwidth consumers
 /// only to `notify` the bitrate properties (the getters read the estimates directly). Each source is
 /// notified on its own change: a status edge notifies `status`/`connected`/`moq-version` together, a
-/// connection-count change notifies `connect-count` and `connection-stats`, and a bitrate change
+/// presence change notifies `sessions`/`sessions-closed` and `connection-stats`, and a bitrate change
 /// notifies just that bitrate.
 /// The loop stops only on a terminal error (a non-retryable auth failure, or a bounded backoff's
 /// give-up), which the `Err` arm posts as a bus error.
@@ -424,7 +424,7 @@ async fn forward_registered(
 					status.set(ConnectionStatus::Failed, None);
 					notify(
 						&element,
-						&["status", "connected", "moq-version", "connection-stats", "connect-count"],
+						&["status", "connected", "moq-version", "connection-stats", "sessions", "sessions-closed"],
 					);
 					if won && let Some(obj) = element.upgrade() {
 						obj.imp().post_session_error(&completion, format!("{err:?}"));
@@ -444,8 +444,8 @@ async fn forward_registered(
 					Ok(_) => notify(&element, &["estimated-recv-bitrate"]),
 					Err(_) => return,
 				},
-				result = connection_stats.connections_changed() => match result {
-					Ok(_) => notify(&element, &["connect-count", "connection-stats"]),
+				result = connection_stats.presence_changed() => match result {
+					Ok(_) => notify(&element, &["sessions", "sessions-closed", "connection-stats"]),
 					Err(_) => return,
 				},
 		}
