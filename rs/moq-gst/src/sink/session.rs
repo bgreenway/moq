@@ -355,7 +355,7 @@ impl Drop for Session {
 /// status/version into the `Status` the getters read, and watches the persistent bandwidth consumers
 /// only to `notify` the bitrate properties (the getters read the estimates directly). Each source is
 /// notified on its own change: a status edge notifies `status`/`connected`/`moq-version` together, a
-/// presence change notifies `sessions`/`sessions-closed` and `connection-stats`, and a bitrate change
+/// presence change notifies `sessions-started`/`sessions-ended` and `connection-stats`, and a bitrate change
 /// notifies just that bitrate.
 /// The loop stops only on a terminal error (a non-retryable auth failure, or a bounded backoff's
 /// give-up), which the `Err` arm posts as a bus error.
@@ -424,7 +424,7 @@ async fn forward_registered(
 					status.set(ConnectionStatus::Failed, None);
 					notify(
 						&element,
-						&["status", "connected", "moq-version", "connection-stats", "sessions", "sessions-closed"],
+						&["status", "connected", "moq-version", "connection-stats", "sessions-started", "sessions-ended"],
 					);
 					if won && let Some(obj) = element.upgrade() {
 						obj.imp().post_session_error(&completion, format!("{err:?}"));
@@ -445,7 +445,7 @@ async fn forward_registered(
 					Err(_) => return,
 				},
 				result = connection_stats.presence_changed() => match result {
-					Ok(_) => notify(&element, &["sessions", "sessions-closed", "connection-stats"]),
+					Ok(_) => notify(&element, &["sessions-started", "sessions-ended", "connection-stats"]),
 					Err(_) => return,
 				},
 		}
