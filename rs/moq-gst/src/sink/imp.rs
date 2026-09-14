@@ -221,6 +221,16 @@ impl ObjectImpl for MoqSink {
 					.blurb("Estimated receive bitrate in bits per second, 0 when unavailable")
 					.read_only()
 					.build(),
+				glib::ParamSpecBoxed::builder::<gst::Structure>("connection-stats")
+					.nick("Connection statistics")
+					.blurb("Current optional transport statistics, null while disconnected")
+					.read_only()
+					.build(),
+				glib::ParamSpecUInt64::builder("connect-count")
+					.nick("Connection count")
+					.blurb("Successful connection transitions during this element session")
+					.read_only()
+					.build(),
 			]
 		});
 		PROPS.as_ref()
@@ -258,7 +268,13 @@ impl ObjectImpl for MoqSink {
 
 	fn property(&self, _id: usize, pspec: &glib::ParamSpec) -> glib::Value {
 		match pspec.name() {
-			"status" | "connected" | "moq-version" | "estimated-send-bitrate" | "estimated-recv-bitrate" => {
+			"status"
+			| "connected"
+			| "moq-version"
+			| "estimated-send-bitrate"
+			| "estimated-recv-bitrate"
+			| "connection-stats"
+			| "connect-count" => {
 				let control = self.control.lock().unwrap();
 				let session = control.live.as_ref().map(|s| &s.session);
 				match pspec.name() {
@@ -267,6 +283,8 @@ impl ObjectImpl for MoqSink {
 					"moq-version" => session.and_then(|s| s.status().version()).to_value(),
 					"estimated-send-bitrate" => session.map(|s| s.send_bitrate()).unwrap_or(0).to_value(),
 					"estimated-recv-bitrate" => session.map(|s| s.recv_bitrate()).unwrap_or(0).to_value(),
+					"connection-stats" => session.and_then(Session::connection_stats).to_value(),
+					"connect-count" => session.map(|s| s.status().connections()).unwrap_or(0).to_value(),
 					_ => unreachable!(),
 				}
 			}
@@ -1420,12 +1438,16 @@ mod tests {
 			"moq-version",
 			"estimated-send-bitrate",
 			"estimated-recv-bitrate",
+			"connection-stats",
+			"connect-count",
 		] {
 			assert!(
 				!spec(&sink, name).flags().contains(glib::ParamFlags::WRITABLE),
 				"{name} is writable"
 			);
 		}
+		assert!(sink.property::<Option<gst::Structure>>("connection-stats").is_none());
+		assert_eq!(sink.property::<u64>("connect-count"), 0);
 	}
 
 	#[test]
