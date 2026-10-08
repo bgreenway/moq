@@ -9,10 +9,11 @@
 //! sources, the tracks, the clock) and executes the actions; see
 //! `origin::run_front`.
 //!
-//! A path names one broadcast, whoever serves it, so any route covering the path
-//! may take over from another and its tracks resume where they stopped. A
-//! publisher reusing a name for different content is a bug; it publishes under a
-//! new name (an epoch) instead.
+//! The driver only offers a front routes that serve its broadcast: those with the
+//! epoch it first resolved, whose tracks resume where they stopped, or its first
+//! route alone when that had no epoch, since nothing says another serves the
+//! same bytes. A newer epoch supersedes the front, ending even the tracks in
+//! flight, so readers re-request the new broadcast rather than stall on the old.
 //!
 //! Sources and tracks are named by ids and names, never handles, so a
 //! transition can be checked in a unit test by comparing the actions it emits.
@@ -23,7 +24,7 @@ use std::{
 	time::Duration,
 };
 
-use crate::{Error, runtime::Instant, track};
+use crate::{Error, time::Instant, track};
 
 /// A route the table selected for the front: the entry id, and whether it is a
 /// broadcast published on this origin.
@@ -37,9 +38,9 @@ pub(super) struct Candidate {
 #[derive(Clone, Debug)]
 pub(super) struct Refusal {
 	pub err: Error,
-	/// Whether the route is still in the table. A refusal from a standing route
-	/// is the handler's answer and is never re-asked; one from a retracted route
-	/// only means the table moved.
+	/// Whether the route still wins the path. A refusal from a standing route
+	/// is the path's answer and ends the front; one from a route that retracted
+	/// or was beaten while pending only means the table moved.
 	pub standing: bool,
 }
 
@@ -88,6 +89,9 @@ pub(super) enum Event {
 	/// The driver let go of a track the machine asked it to [`Action::Forget`].
 	/// Not fed when a reader arrived first: [`Event::Used`] follows instead.
 	Forgotten { track: Arc<str> },
+	/// A newer publisher instance replaced the broadcast: every track ends now,
+	/// even one in flight, and readers re-request the path.
+	Superseded,
 	/// The origin is tearing down.
 	Closed,
 }
@@ -172,9 +176,8 @@ pub(super) struct Front {
 	serving_closing: bool,
 	/// The route an upstream request is in flight through.
 	upstream: Option<Candidate>,
-	/// Routes excluded from selection: they refused the path while another
-	/// source was serving, or their source ended while still advertised.
-	refused: HashSet<u64>,
+	/// Routes excluded from selection: their source ended while still advertised.
+	excluded: HashSet<u64>,
 	/// Why the last candidate fell through, reported if the front ends unresolved.
 	last_err: Option<Error>,
 	/// Whether the parked requesters were resolved (the first source attached).
@@ -198,7 +201,7 @@ impl Front {
 			serving: None,
 			serving_closing: false,
 			upstream: None,
-			refused: HashSet::new(),
+			excluded: HashSet::new(),
 			last_err: None,
 			resolved: false,
 			tracks: BTreeMap::new(),
@@ -210,13 +213,18 @@ impl Front {
 	}
 
 	/// The routes excluded from selection; the driver skips them.
-	pub(super) fn refused_routes(&self) -> &HashSet<u64> {
-		&self.refused
+	pub(super) fn excluded_routes(&self) -> &HashSet<u64> {
+		&self.excluded
 	}
 
-	/// Forget refused routes that left the table (a reconnect is a fresh entry).
+	/// Forget excluded routes that left the table (a reconnect is a fresh entry).
 	pub(super) fn retain_routes(&mut self, standing: impl Fn(u64) -> bool) {
-		self.refused.retain(|route| standing(*route));
+		self.excluded.retain(|route| standing(*route));
+	}
+
+	/// The route the attached source came through, if any.
+	pub(super) fn serving_route(&self) -> Option<u64> {
+		self.serving.map(|(_, candidate)| candidate.route)
 	}
 
 	/// The attached source, if any.
@@ -276,6 +284,7 @@ impl Front {
 			Event::Forgotten { track } => {
 				self.tracks.remove(&track);
 			}
+			Event::Superseded => self.supersede(&mut actions),
 			Event::Closed => self.end(Error::Dropped, &mut actions),
 		}
 		if !self.ended {
@@ -332,21 +341,20 @@ impl Front {
 				self.upstream = None;
 				self.attach(source, upstream, actions);
 			}
-			// The route retracted before serving: the table already reflects
-			// it, so the next selection retries the survivor.
+			// The route retracted or was beaten before serving: the table already
+			// reflects it, so the next selection asks the new winner. Its own error
+			// is moot, so a front left with nothing reports the path unroutable.
 			Err(Refusal { standing: false, .. }) => {
 				self.upstream = None;
 				self.last_err = Some(Error::Unroutable);
 				actions.push(Action::Reselect);
 			}
-			// An authoritative refusal of the path: skip the refuser. Another route may
-			// still serve, and with none left the selection ends the front with this
-			// error.
+			// The winning route's answer is final, even while another source serves:
+			// asking a sibling or a shorter prefix instead would turn one refusal into
+			// a request per candidate.
 			Err(Refusal { err, standing: true }) => {
 				self.upstream = None;
-				self.refused.insert(route);
-				self.last_err = Some(err);
-				actions.push(Action::Reselect);
+				self.end(err, actions);
 			}
 		}
 	}
@@ -386,7 +394,7 @@ impl Front {
 		// A standing route can outlive the source it produced. Asking it again
 		// would re-request the broadcast that just ended; another route may still
 		// resume it.
-		self.refused.insert(candidate.route);
+		self.excluded.insert(candidate.route);
 		self.serving = None;
 		self.serving_closing = false;
 		actions.push(Action::Detach { source });
@@ -472,8 +480,9 @@ impl Front {
 		let spliced = track.state == (TrackState::Spliced { source });
 		if track.draining == Some(source) {
 			track.draining = None;
-			// A path is one broadcast, so a copy that completed ends the track whoever
-			// serves it now. One that failed leaves the track to the serving source.
+			// Every source of a front serves one broadcast, so a copy that completed ends
+			// the track whoever serves it now. One that failed leaves the track to the
+			// serving source.
 			if result.is_ok() && !track.ended {
 				track.state = TrackState::Idle;
 				track.ended = true;
@@ -620,6 +629,21 @@ impl Front {
 				_ => None,
 			})
 			.min()
+	}
+
+	/// Abort every track still going, then end: unlike a retraction, a newer
+	/// broadcast does not leave readers on the old one's copies.
+	fn supersede(&mut self, actions: &mut Vec<Action>) {
+		for (name, track) in &mut self.tracks {
+			if !track.ended {
+				track.ended = true;
+				actions.push(Action::Abort {
+					track: name.clone(),
+					err: Error::Unroutable,
+				});
+			}
+		}
+		self.end(Error::Unroutable, actions);
 	}
 
 	fn end(&mut self, err: Error, actions: &mut Vec<Action>) {
@@ -801,7 +825,7 @@ mod tests {
 			front.step(Event::SourceClosed { source: 100 }),
 			&[Action::Detach { source: 100 }, Action::Reselect],
 		);
-		assert!(front.refused_routes().contains(&1));
+		assert_eq!(front.excluded_routes(), &HashSet::from([1]));
 		assert_actions(
 			front.step(Event::Selected {
 				best: Some(remote(3)),
@@ -848,83 +872,52 @@ mod tests {
 		);
 	}
 
-	/// A refusal skips the refuser rather than ending the front: another route to the
-	/// same content may serve. With none left, the front ends with the refusal.
+	fn refuse(front: &mut Front, route: u64) -> Vec<Action> {
+		front.step(Event::Resolved {
+			route,
+			result: Err(Refusal {
+				err: Error::NotFound,
+				standing: true,
+			}),
+		})
+	}
+
+	/// The winning route's refusal is the answer: no other route is asked.
 	#[test]
-	fn standing_refusal_tries_the_next_route_then_ends() {
+	fn standing_refusal_ends_the_front() {
 		let mut front = Front::new(LINGER);
 		front.step(Event::Selected {
 			best: Some(remote(1)),
 			serving_closing: false,
 		});
-		assert_actions(
-			front.step(Event::Resolved {
-				route: 1,
-				result: Err(Refusal {
-					err: Error::NotFound,
-					standing: true,
-				}),
-			}),
-			&[Action::Reselect],
-		);
-		assert_eq!(front.refused_routes(), &HashSet::from([1]));
-		assert_actions(
-			front.step(Event::Selected {
-				best: None,
-				serving_closing: false,
-			}),
-			&[Action::End { err: Error::NotFound }],
-		);
+		assert_actions(refuse(&mut front, 1), &[Action::End { err: Error::NotFound }]);
+		assert!(front.ended());
 	}
 
-	/// The audit's F2: the serving source died, and the first replacement refuses the
-	/// path. A second route is still tried.
+	/// The serving source died and its replacement refuses the path: the front ends with
+	/// that refusal rather than trying a third route.
 	#[test]
-	fn standing_refusal_after_the_source_died_tries_another_route() {
+	fn standing_refusal_after_the_source_died_ends_the_front() {
 		let mut front = serving(remote(1), 100);
 		front.step(Event::SourceClosed { source: 100 });
 		front.step(Event::Selected {
 			best: Some(remote(2)),
 			serving_closing: false,
 		});
-		assert_actions(
-			front.step(Event::Resolved {
-				route: 2,
-				result: Err(Refusal {
-					err: Error::NotFound,
-					standing: true,
-				}),
-			}),
-			&[Action::Reselect],
-		);
-		assert_actions(
-			front.step(Event::Selected {
-				best: Some(remote(3)),
-				serving_closing: false,
-			}),
-			&[Action::Request { route: 3 }],
-		);
+		assert_actions(refuse(&mut front, 2), &[Action::End { err: Error::NotFound }]);
 	}
 
+	/// A better route refusing ends the front even while another source serves: its read
+	/// tracks finish on the copies they are spliced from, and a new request gets the refusal.
 	#[test]
-	fn standing_refusal_while_serving_skips_the_refuser() {
+	fn standing_refusal_while_serving_ends_the_front() {
 		let mut front = serving(remote(1), 100);
 		front.step(Event::Selected {
 			best: Some(remote(2)),
 			serving_closing: false,
 		});
-		assert_actions(
-			front.step(Event::Resolved {
-				route: 2,
-				result: Err(Refusal {
-					err: Error::NotFound,
-					standing: true,
-				}),
-			}),
-			&[Action::Reselect],
-		);
-		assert!(front.refused_routes().contains(&2));
-		assert_eq!(front.serving, Some((100, remote(1))));
+		assert_actions(refuse(&mut front, 2), &[Action::End { err: Error::NotFound }]);
+		assert!(front.excluded_routes().is_empty());
 	}
 
 	#[test]
@@ -944,7 +937,7 @@ mod tests {
 			}),
 			&[Action::Reselect],
 		);
-		assert!(front.refused_routes().is_empty());
+		assert!(front.excluded_routes().is_empty());
 		assert!(!front.ended());
 	}
 
@@ -1559,40 +1552,38 @@ mod tests {
 		);
 	}
 
-	/// A front that served ends `Dropped` when its route leaves, not with the refusal or
-	/// retraction of a challenger that never took over.
+	/// A front that served ends `Dropped` when its route leaves, not with the retraction
+	/// of a challenger that never took over.
 	#[test]
 	fn a_front_that_served_ends_dropped() {
-		for standing in [true, false] {
-			let mut front = serving(remote(1), 100);
+		let mut front = serving(remote(1), 100);
+		front.step(Event::Selected {
+			best: Some(remote(2)),
+			serving_closing: false,
+		});
+		front.step(Event::Resolved {
+			route: 2,
+			result: Err(Refusal {
+				err: Error::Unroutable,
+				standing: false,
+			}),
+		});
+		front.step(Event::Selected {
+			best: Some(remote(1)),
+			serving_closing: false,
+		});
+		assert_actions(
 			front.step(Event::Selected {
-				best: Some(remote(2)),
+				best: None,
 				serving_closing: false,
-			});
-			front.step(Event::Resolved {
-				route: 2,
-				result: Err(Refusal {
-					err: Error::NotFound,
-					standing,
-				}),
-			});
-			front.step(Event::Selected {
-				best: Some(remote(1)),
-				serving_closing: false,
-			});
-			assert_actions(
-				front.step(Event::Selected {
-					best: None,
-					serving_closing: false,
-				}),
-				&[Action::End { err: Error::Dropped }],
-			);
-		}
+			}),
+			&[Action::End { err: Error::Dropped }],
+		);
 	}
 
 	/// The serving source closed and the front reselected, but the pump still reads the
-	/// closed source's copy. That copy ending cleanly ends the track: a path is one
-	/// broadcast, whoever serves it.
+	/// closed source's copy. That copy ending cleanly ends the track: every source of
+	/// the front serves one broadcast.
 	#[test]
 	fn a_closed_sources_clean_end_finishes_the_track() {
 		let mut front = serving(remote(1), 100);

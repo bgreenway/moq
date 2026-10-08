@@ -1,8 +1,8 @@
 //! Serve a front's logical track straight from its routes' copies.
 //!
 //! A front serves each track through one route at a time and switches when that route
-//! dies, withdraws, or is beaten. A path names one broadcast whoever serves it, so every
-//! route's copy of a track holds the same groups and frames. A reader of the logical
+//! dies, withdraws, or is beaten by another with the same epoch. Routes with one epoch
+//! serve one broadcast, so every route's copy of a track holds the same groups and frames. A reader of the logical
 //! track therefore reads the serving route's copy directly, through its own
 //! [`Subscriber`]: nothing is copied, and with one route it is a passthrough.
 //!
@@ -31,10 +31,14 @@ const MAX_DELIVERED: usize = 1024;
 struct Route {
 	/// Bumped whenever `copy` changes, so a reader can tell a replacement apart.
 	generation: u64,
-	/// The serving route's copy; `None` while nobody reads the track, or between routes.
+	/// The serving route's copy; `None` while nobody reads the track, between routes, or
+	/// once the front let go.
 	copy: Option<track::Consumer>,
 	/// How the track ended, once the front decided.
 	end: Option<Result<()>>,
+	/// No front is left to replace the copy, though one may still hold it for readers
+	/// on their way: readers follow it to its end.
+	concluded: bool,
 }
 
 /// Every reader of a logical track, so a new copy subscribes them all as it is served:
@@ -44,7 +48,9 @@ type Readers = Arc<Mutex<Vec<Weak<Mutex<Reader>>>>>;
 /// The front's side of a logical track: which copy serves it, and how it ends.
 ///
 /// Dropping it concludes the track: readers follow the last copy to its end, since no
-/// front is left to replace it.
+/// front is left to replace it. [`Producer::release`] also lets go of that copy, so it
+/// stops keeping its route subscribed however long the logical track's state stays
+/// allocated.
 pub(crate) struct Producer {
 	state: kio::Producer<Route>,
 	readers: Readers,
@@ -90,6 +96,22 @@ impl Producer {
 			&& route.end.is_none()
 		{
 			route.end = Some(result);
+		}
+	}
+
+	/// No front will replace the serving copy: readers follow it to its end, while this
+	/// still holds it for the readers on their way.
+	pub(crate) fn conclude(&self) {
+		if let Ok(mut route) = self.state.write() {
+			route.concluded = true;
+		}
+	}
+
+	/// Let go of the serving copy once no front will replace it and nobody reads the
+	/// track. Same generation: a reader on the copy keeps it as the serving one.
+	pub(crate) fn release(self) {
+		if let Ok(mut route) = self.state.write() {
+			route.copy = None;
 		}
 	}
 
@@ -161,7 +183,7 @@ impl Consumer {
 	/// Poll for the route state to move past `generation`, or the track to end.
 	fn poll_changed(&self, generation: u64, waiter: &kio::Waiter) -> Poll<()> {
 		match self.state.poll(waiter, |route| {
-			match route.generation != generation || route.end.is_some() {
+			match route.generation != generation || route.end.is_some() || route.concluded {
 				true => Poll::Ready(()),
 				false => Poll::Pending,
 			}
@@ -176,7 +198,7 @@ impl Consumer {
 	/// decision.
 	fn end(&self) -> Option<Option<Result<()>>> {
 		let route = self.state.read();
-		match (&route.end, route.is_closed()) {
+		match (&route.end, route.concluded || route.is_closed()) {
 			(Some(end), _) => Some(Some(end.clone())),
 			(None, true) => Some(None),
 			(None, false) => None,
@@ -321,6 +343,12 @@ impl Subscriber {
 	/// Raise the local read floor; see [`track::Subscriber::set_groups`].
 	pub(crate) fn raise_start_to(&mut self, start: u64) {
 		self.reader().raise_start_to(start)
+	}
+
+	/// Move the local read floor to `start`, including downward.
+	/// See [`track::Subscriber::start_at`].
+	pub(crate) fn start_at(&mut self, start: u64) {
+		self.reader().start_at(start)
 	}
 
 	/// Cap local reads at `end`; see [`track::Subscriber::set_groups`].
@@ -728,6 +756,19 @@ impl Reader {
 		}
 	}
 
+	/// Assign the local floor. A copy still waiting on its info takes the floor
+	/// from the mirrored subscription when it resolves; one already reading has
+	/// to be moved, or a group it skipped stays skipped. Never below a copy's own
+	/// resume point: groups under it were handed out by an earlier route, or never owed.
+	fn start_at(&mut self, start: u64) {
+		self.groups.0 = start;
+		for copy in &mut self.copies {
+			if let Sub::Ready(sub) = &mut copy.sub {
+				sub.start_at(copy.floor.map_or(start, |floor| start.max(floor.group)));
+			}
+		}
+	}
+
 	fn end_at(&mut self, end: Cap) {
 		self.groups.1 = end;
 		for copy in &mut self.copies {
@@ -820,7 +861,7 @@ impl Recover {
 					route.generation,
 					route.copy.clone(),
 					route.end.clone(),
-					route.is_closed(),
+					route.concluded || route.is_closed(),
 				)
 			};
 			// Registered before looking, so a route change from here on wakes the reader.
@@ -938,7 +979,7 @@ impl Recover {
 		// A held group or frame may be the only thing being polled. Mirror and watch
 		// preferences here too, before judging its budget against the live edge.
 		reader.sync(waiter);
-		Some(reader.mirrored.max_age)
+		Some(reader.mirrored.max_delay)
 	}
 
 	/// Commit the replacement only once the caller has acquired its cursor or frame.
@@ -1052,8 +1093,8 @@ mod test {
 			.accept(None)
 	}
 
-	fn subscribe(logical: &track::Producer, max_age: Duration) -> track::Subscriber {
-		let subscription = Subscription::default().with_max_age(max_age);
+	fn subscribe(logical: &track::Producer, max_delay: Duration) -> track::Subscriber {
+		let subscription = Subscription::default().with_max_delay(max_delay);
 		logical
 			.consume()
 			.subscribe(subscription)
@@ -1140,7 +1181,7 @@ mod test {
 		let mut frame = open
 			.create_frame(crate::frame::Info {
 				size: 4,
-				timestamp: ts(0),
+				timestamp: Some(ts(0)),
 			})
 			.unwrap();
 		frame.write(b"ab".as_ref()).unwrap();
@@ -1187,6 +1228,35 @@ mod test {
 		routes.serve(b.consume());
 		assert_eq!(recv(&mut sub).sequence, 2);
 		assert!(sub.recv_group().now_or_never().is_none());
+	}
+
+	/// A replacement copy asked to start at the newest group handed out keeps that
+	/// floor when the reader's floor widens: an older group its route cached was
+	/// never owed, and handing it out now would be out of order.
+	#[test]
+	fn a_widened_floor_stays_above_the_replacement_resume_point() {
+		let routes = Producer::new();
+		let logical = logical(&routes);
+		let a = copy();
+		routes.serve(a.consume());
+		let mut sub = subscribe(&logical, Duration::from_secs(10));
+		let mut group = a.create_group(group::Info { sequence: 5 }).unwrap();
+		group.write_frame(ts(5), b"x".as_ref()).unwrap();
+		group.finish().unwrap();
+		assert_eq!(recv(&mut sub).sequence, 5);
+
+		let b = copy();
+		routes.serve(b.consume());
+		// Subscribe the replacement before it has anything, so the update moves a ready copy.
+		assert!(sub.recv_group().now_or_never().is_none());
+		for sequence in [2, 6] {
+			let mut group = b.create_group(group::Info { sequence }).unwrap();
+			group.write_frame(ts(sequence), b"x".as_ref()).unwrap();
+			group.finish().unwrap();
+		}
+
+		sub.start_at(0);
+		assert_eq!(recv(&mut sub).sequence, 6);
 	}
 
 	#[test]
@@ -1303,7 +1373,7 @@ mod test {
 			let mut frame = open
 				.create_frame(crate::frame::Info {
 					size: 4,
-					timestamp: ts(0),
+					timestamp: Some(ts(0)),
 				})
 				.unwrap();
 			frame.write(b"ab".as_ref()).unwrap();
@@ -1352,7 +1422,7 @@ mod test {
 			let mut frame = open
 				.create_frame(crate::frame::Info {
 					size: 4,
-					timestamp: ts(0),
+					timestamp: Some(ts(0)),
 				})
 				.unwrap();
 			frame.write(b"a".as_ref()).unwrap();
@@ -1365,7 +1435,7 @@ mod test {
 			let mut replacement_frame = replacement
 				.create_frame(crate::frame::Info {
 					size: 4,
-					timestamp: ts(0),
+					timestamp: Some(ts(0)),
 				})
 				.unwrap();
 			replacement_frame.write(b"ab".as_ref()).unwrap();
@@ -1682,7 +1752,7 @@ mod test {
 								let mut frame = group
 									.create_frame(crate::frame::Info {
 										size: 4,
-										timestamp: ts(1),
+										timestamp: Some(ts(1)),
 									})
 									.unwrap();
 								frame.write(b"ab".as_ref()).unwrap();
@@ -1721,7 +1791,7 @@ mod test {
 						.update(
 							Subscription::default()
 								.with_priority(7)
-								.with_max_age(Duration::from_secs(if widen { 10 } else { 2 })),
+								.with_max_delay(Duration::from_secs(if widen { 10 } else { 2 })),
 						)
 						.unwrap();
 					assert!(
@@ -1758,7 +1828,7 @@ mod test {
 							.update(
 								Subscription::default()
 									.with_priority(8)
-									.with_max_age(Duration::from_secs(10)),
+									.with_max_delay(Duration::from_secs(10)),
 							)
 							.unwrap();
 						assert!(
@@ -1850,7 +1920,7 @@ mod test {
 						.update(
 							Subscription::default()
 								.with_priority(7)
-								.with_max_age(Duration::from_secs(2)),
+								.with_max_delay(Duration::from_secs(2)),
 						)
 						.unwrap(),
 					Event::Cancel => {
@@ -1876,7 +1946,7 @@ mod test {
 			);
 			let demand = copies[0].subscription().expect("surviving reader");
 			assert_eq!(demand.priority, 7, "{events:?}");
-			assert_eq!(demand.max_age, Duration::from_secs(2), "{events:?}");
+			assert_eq!(demand.max_delay, Duration::from_secs(2), "{events:?}");
 			drop(groups);
 			drop(subscriptions);
 			drop(control);

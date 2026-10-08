@@ -37,6 +37,9 @@ in sync at the latency you ask for.
 | `announced` | Wait for the broadcast to be announced before subscribing (default on), so a player can be mounted before the stream exists. |
 | `catalog-format` | `hang` (default, from the `.hang` suffix), `hangz` (compressed), `msf`, or `manual` to supply the catalog yourself. |
 
+A volume change ramps over `el.emitter.fade`, 200ms by default; 0 steps at
+once.
+
 Video holds its last picture while paused, out of view, or waiting for a
 resumed rendition's first frame. Its reported timestamp stays with that picture.
 Going offline or closing the player clears it.
@@ -127,7 +130,8 @@ const dispose = el.signals.run((effect) => {
 
 Call `dispose()` from your framework's unmount cleanup when this subscription
 is no longer needed. Removing the element disables playback but keeps its
-effects open so the same node can reconnect.
+effects open so the same node can reconnect. Its audio graph is released and
+rebuilt on return; pausing or muting keeps the graph warm.
 
 The effect re-runs whenever the catalog or the active broadcast changes, so a
 reconnect resubscribes on its own. A publisher that rewrites its catalog often

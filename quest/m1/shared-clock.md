@@ -12,8 +12,8 @@ backwards, and `container::Producer::write` refuses a group below the last one
 (`TimestampRewind`), even across a discontinuity.
 
 The catalog's root `clock` is also final from the first snapshot a consumer
-sees. [import-first-frame](/quest/m1/import-first-frame.md) covers a lone
-importer; a container set up after a data track or catalog section has
+sees. A lone importer already holds its catalog until its first frame
+anchors; a container set up after a data track or catalog section has
 published (any order moq-c and moq-ffi allow) still re-anchors it after
 copy-once readers (moq-hls export, derived broadcasts) took the old one.
 
@@ -96,6 +96,17 @@ Decided (2026-10-05):
   never share a clock), and deferring to #2279 (this quest is what makes the
   splice times stale).
 
+Decided in the 2026-10-06 audit (with
+[Same-epoch importers](/quest/m1/hop-aligned-import.md)):
+
+- A same-epoch (redundant) importer's offset or anchor comes from its input
+  (its PTS or PCR) or from the shared epoch, never from `clock.now()`. It
+  supplies that input-derived anchor through this quest's `Input`/offset API,
+  so Same-epoch importers only provides it, and two importers of one stream
+  publish identical timestamps even when the clock is already fixed. The
+  arrival-derived `clock.now() - first_pts` above stays the rule for every
+  other importer. Rejected: keeping the two quests' anchoring separate.
+
 Guidance:
 
 - The offset is signed: a stream starting at 3600 s on a clock reading 10 s
@@ -129,16 +140,16 @@ Guidance:
   decodes at the frame timestamp, in Rust and JS.
 
 Public API: `catalog::Input`, `catalog::Producer::input`, and
-`Input::reserve` are new. `catalog::Producer::clock()` and the first publish
+`Input::reserve` are new, and `Input` accepts an input-derived anchor in
+place of the arrival one. `catalog::Producer::clock()` and the first publish
 now fix the mapping, and importers no longer publish verbatim PTS when the
 clock was already taken or set with `Config::with_clock`.
 Wire: none.
 
 ## Required
 
-- [Import at the first frame](/quest/m1/import-first-frame.md) - a lone importer anchors before the first publish, so the publish rule doesn't offset it
 - [CMAF frame timestamp](/quest/m1/cmaf-frame-timestamp.md) - decoders honour an offset frame timestamp on passthrough tracks
 
 ## Related
 
-- [Audio capture time](/quest/m2/audio-capture-time.md) - maps audio's capture timeline onto the broadcast clock once per open
+- [Same-epoch importers](/quest/m1/hop-aligned-import.md) - supplies the input-derived anchor through this quest's API
