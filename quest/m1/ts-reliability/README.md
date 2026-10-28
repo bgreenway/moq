@@ -103,7 +103,6 @@ catalog linger (#5305).
 - [Export re-acquires a step](/quest/m1/ts-reliability/export-reacquire.md) - `moq export ts` re-acquires an unmarked timeline step instead of exiting on fake drift
 - [A restart keeps its catalog](/quest/m1/ts-reliability/restart-catalog.md) - a restarted import publishes its catalog with its first media
 - [PAT changes](/quest/m1/ts-reliability/pat-lifecycle.md) - a running export follows a moved PMT PID
-- [TS workflow passes](/quest/m1/ts-reliability/validation-green.md) - the scheduled TS lanes pass on main again, with no lane loosened
 - [A demoted subscriber priority reaches the publisher](/quest/m1/ts-reliability/stitch-catch-up.md) - a mid-stream priority demotion reaches the publisher on lite-07 and moq-transport, including an old instance after an epoch switch
 
 ## Related
