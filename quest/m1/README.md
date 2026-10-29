@@ -155,7 +155,6 @@ removed).
 - [On-demand JavaScript FETCH](/quest/m1/js-fetch-on-demand.md) - browser publishers answer IETF FETCH for evicted or uncached groups through the JS ranges request surface
 - [Rust FETCH parity](/quest/m1/ietf-fetch-parity.md) - Rust finishes an answered joining FETCH's head, refuses a lost head with DOES_NOT_EXIST, and sends no timestamps without TIMESCALE, as the JS publisher does
 - [SUBSCRIBE honors the properties opt-out](/quest/m1/subscribe-timestamps.md) - the Rust publisher sends untimed objects to a SUBSCRIBE that declines Track Properties, and the Rust subscriber asks for them when it needs timestamps
-- [JS joins at the current group](/quest/m1/ietf-js-join.md) - a late JS moq-transport subscriber gets the group in progress whole through a joining FETCH or fill, as Rust does
 - [Rust marks a lost listed group unknown](/quest/m1/ietf-publisher-unknown-range.md) - the Rust IETF publisher sends End of Unknown Range for a listed group it can't serve, after the publisher's open quests land
 - [Identity and recovery guide](/quest/m1/identity-guide.md) - explain epochs, pinned catalogs, lazy jobs, restart and version compatibility as they exist; takeover adds its own section
 - [Native rung disable](/quest/m1/simulcast-rung-disable.md) - OBS stops sending the top renditions its grant cannot fund, as the Rust/FFI publishers do, and a shaped uplink through moq-ffi proves the resume
