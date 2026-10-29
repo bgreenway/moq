@@ -489,6 +489,10 @@ pub(crate) struct TrackState {
 	// Kept here (rather than threaded through every handle) so any holder reaches it.
 	subscriptions: kio::Lock<Subscriptions>,
 
+	// Demand wakes a write owes, fired once the state guard is released (see
+	// [`Self::deferred`]). A woken waker may read this track, so none fires under its lock.
+	deferred: Vec<kio::WaiterList>,
+
 	// The fills readers queued for groups they miss (see [`Fill`]), same reasoning: a miss
 	// queues here and a `Requests` drains.
 	fills: kio::Shared<FillState>,
@@ -1902,11 +1906,21 @@ impl TrackState {
 	/// changes it, even one below a reached end.
 	///
 	/// `answers` when it is a group subscribers receive, which answers a pending refresh.
+	///
+	/// The demand wakes it owes wait in [`Self::deferred`] for the caller to fire once its guard
+	/// is released.
 	fn advance(&mut self, sequence: u64, answers: bool) {
 		self.max_sequence = Some(self.max_sequence.map_or(sequence, |max| max.max(sequence)));
 		self.cache.advance_largest(Position::group(sequence));
-		let mut wakes = self.subscriptions.lock().wrote(sequence, answers);
-		wakes.wake();
+		let wakes = self.subscriptions.lock().wrote(sequence, answers);
+		if !wakes.is_empty() {
+			self.deferred.push(wakes);
+		}
+	}
+
+	/// Take the wakes [`Self::advance`] deferred, to fire once the state guard is released.
+	pub(super) fn deferred(&mut self) -> Deferred {
+		Deferred(std::mem::take(&mut self.deferred))
 	}
 
 	/// The sequence the next append takes: one past this track's own writes.
@@ -2749,6 +2763,18 @@ impl TrackState {
 	}
 }
 
+/// Demand wakes taken out of the track state, fired once its guard is gone.
+#[must_use = "fire the wakes once the guard is released"]
+pub(super) struct Deferred(Vec<kio::WaiterList>);
+
+impl Deferred {
+	pub(super) fn wake(self) {
+		for mut wakes in self.0 {
+			wakes.wake();
+		}
+	}
+}
+
 /// Record `err` and close the track, the shared tail of every abort, returning the open
 /// groups to abort once the guard is gone.
 fn commit_abort(mut state: kio::Mut<'_, TrackState>, err: Error) -> OpenGroups {
@@ -2970,6 +2996,9 @@ impl Producer {
 		}
 		state.cap(&group.handle())?;
 		state.commit_group(&group.handle());
+		let deferred = state.deferred();
+		drop(state);
+		deferred.wake();
 		Ok(group)
 	}
 
@@ -2993,6 +3022,9 @@ impl Producer {
 			group::Producer::new(group::Info { sequence }, track, state.cache.clone()).with_meter(self.stats.meter());
 		state.cap(&group.handle())?;
 		state.commit_group(&group.handle());
+		let deferred = state.deferred();
+		drop(state);
+		deferred.wake();
 
 		Ok(group)
 	}
@@ -3053,7 +3085,9 @@ impl Producer {
 		meter.datagram(datagram.stored_len());
 		state.push_datagram(datagram);
 		let cache = state.cache.clone();
+		let deferred = state.deferred();
 		drop(state);
+		deferred.wake();
 		cache.settle(None);
 		Ok(sequence)
 	}
@@ -3103,7 +3137,9 @@ impl Producer {
 		meter.datagram(datagram.stored_len());
 		state.push_datagram(datagram);
 		let cache = state.cache.clone();
+		let deferred = state.deferred();
 		drop(state);
+		deferred.wake();
 		cache.settle(None);
 		Ok(())
 	}
