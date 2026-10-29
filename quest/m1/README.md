@@ -158,12 +158,14 @@ removed).
 - [SUBSCRIBE honors the properties opt-out](/quest/m1/subscribe-timestamps.md) - the Rust publisher sends untimed objects to a SUBSCRIBE that declines Track Properties, and the Rust subscriber asks for them when it needs timestamps
 - [JS FETCH timeout test](/quest/m1/js-fetch-timeout-test.md) - a JS joining FETCH still waiting on its SUBSCRIBE at the deadline is refused with TIMEOUT
 - [JS joins at the current group](/quest/m1/ietf-js-join.md) - a late JS moq-transport subscriber gets the group in progress whole through a joining FETCH or fill, as Rust does
+- [Rust marks a lost listed group unknown](/quest/m1/ietf-publisher-unknown-range.md) - the Rust IETF publisher sends End of Unknown Range for a listed group it can't serve, after the publisher's open quests land
 - [Identity and recovery guide](/quest/m1/identity-guide.md) - explain epochs, pinned catalogs, lazy jobs, restart and version compatibility as they exist; takeover adds its own section
 - [Native rung disable](/quest/m1/simulcast-rung-disable.md) - OBS stops sending the top renditions its grant cannot fund, as the Rust/FFI publishers do, and a shaped uplink through moq-ffi proves the resume
 - [Audio jitter target](/quest/m1/audio-jitter-target/README.md) - the playout target is default in both languages; a manual browser proof and a native trace replay remain
 - [A/V clock](/quest/m1/av-clock.md) - the audio playhead drives Sync.reference while audio plays, through per-track sync handles
 - [Container reads drop backfill](/quest/m1/read-backfill.md) - the JS container consumer drops groups below its read cursor like Rust
 - [Buffered playback subscribes in ascending order](/quest/m1/buffered-ascending.md) - a buffered `<moq-watch>` asks for the oldest group first, so a voice reply's opening arrives first, and audio's head hold shrinks to the floor
+- [The publish controls stay visible without a preview](/quest/m1/publish-controls.md) - `<moq-publish>`'s controls no longer collapse with a live camera and no preview
 - [Push-to-talk loses no speech](/quest/m1/push-to-talk/README.md) - consumers hold a disabled rendition, and an unmute encodes at once with the mic still open
 - [Always-on encoding](/quest/m1/eager-encode/README.md) - publishers encode while enabled whatever the demand, so the past exists to fetch; on-demand is opt-in, and audio returns to it through a raw backbuffer
 - [TS fidelity and recovery](/quest/m1/ts-reliability/README.md) - both modes have explicit profiles, automated validation, loss tests, and a dedicated guide
@@ -174,7 +176,10 @@ removed).
 - [moq-clock's tests pass under cargo test](/quest/m1/clock-test-process.md) - `paused_runtimes_own_their_anchors` stops depending on being first in its process
 - [kio's log tests pass in a workspace build](/quest/m1/kio-workspace-tests.md) - the eviction tests pass under the workspace's unified features, or eviction is fixed
 - [The JS stalled-consumer eviction test ages its groups](/quest/m1/js-cache-age-test.md) - the test drives the clock the cache reads, so it can fail
+- [moq-transport-22 FETCH cost](/quest/m1/ietf22-fetch-poll-cost.md) - #7042's +12.8% instructions on draft-22 FETCH is fixed or attributed
+- [An idle track poll exits cheaply](/quest/m1/idle-poll-exit.md) - a reader's poll on a track with nothing new costs a small constant, not ~3,800 instructions
 - [Main is no slower than release](/quest/m1/release-perf/README.md) - every benchmark where main is slower than release is fixed or accepted with a reason, checked by a final paired run before the cut
+- [The browser baseline keeps its page logs](/quest/m1/baseline-page-logs.md) - a failing wasm-baseline cell is diagnosable from its artifact
 - [Interop coverage](/quest/m1/interop-coverage/README.md) - the riskiest moq-transport features moq-net exposes get cross-implementation tests over drafts 18 and 22
 - [Calibrate the paired nightly benchmarks](/quest/m1/bench-ci.md) - A/A and deliberately slowed Nightly runs set the paired comparison's threshold, so its regression alerts can be trusted
 - [HLS and DASH segment conformance](/quest/m1/hls-conformance.md) - nightly ffprobe checks that advertised timing, sync flags, and bytes match the media served
