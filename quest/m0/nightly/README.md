@@ -31,7 +31,6 @@ Public API: none. Wire: none.
 
 ## Required
 
-- [Log eviction passes the ARM concurrency model](/quest/m0/nightly/log-eviction.md) - the log eviction model passes on ARM and x86, with every segment access protected from reclamation
 - [The software renderer tests both capability paths](/quest/m0/nightly/render-capabilities.md) - the software-renderer lane verifies output selection with and without DMA-BUF import support without requiring hardware the runner lacks
 - [The browser backend baseline completes on IETF22](/quest/m0/nightly/browser-baseline.md) - the WASM and UniFFI backend baseline completes every supported transport case without an internal error
 - [A stitched restart signals every TS discontinuity](/quest/m0/nightly/stitch-discontinuity.md) - a restarted publisher exported with stitching signals the program break on every affected PID
