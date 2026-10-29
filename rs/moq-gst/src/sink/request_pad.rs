@@ -595,7 +595,9 @@ mod tests {
 		let estimate = moq_net::bandwidth::Producer::new();
 		let allocator = moq_net::bandwidth::Allocator::new(estimate.consume());
 		let broadcast = moq_net::broadcast::Info::default().produce();
-		let track = broadcast.create_track("camera", moq_net::track::Info::timed()).unwrap();
+		let track = broadcast
+			.create_track("camera", moq_net::track::Info::default())
+			.unwrap();
 		pad.lifecycle().bandwidth = Some(Bandwidth::new(track.demand(), allocator, 4_000_000));
 
 		let state = pad.property::<gst::Structure>("track-demand");
