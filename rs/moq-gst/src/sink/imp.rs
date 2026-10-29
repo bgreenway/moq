@@ -815,7 +815,7 @@ impl MoqSink {
 						if lifecycle.releasing {
 							return false;
 						}
-						Some(observe_caps(state, catalog, &mut lifecycle, &caps))
+						Some(observe_caps(state, catalog, sink_pad, &mut lifecycle, &caps))
 					} else {
 						None
 					}
@@ -918,7 +918,7 @@ impl MoqSink {
 									}
 									let caps = lifecycle.media.resumable_caps();
 									caps.zip(catalog).and_then(|(caps, catalog)| {
-										observe_caps(state, catalog, &mut lifecycle, &caps).0
+										observe_caps(state, catalog, sink_pad, &mut lifecycle, &caps).0
 									})
 								}
 							}
@@ -1206,6 +1206,7 @@ async fn linger_task<T>(
 fn observe_caps(
 	state: &State,
 	catalog: &moq_mux::catalog::Producer,
+	pad: &MoqSinkPad,
 	lifecycle: &mut PadLifecycle,
 	caps: &gst::Caps,
 ) -> (Option<Notifications>, bool) {
@@ -1218,7 +1219,7 @@ fn observe_caps(
 	let outcome = lifecycle.media.observe_caps(&state.broadcast, catalog, options);
 	lifecycle.completion = Some(state.session.completion());
 	match outcome {
-		CapsOutcome::Active(track) => (Some(lifecycle.commit(track)), true),
+		CapsOutcome::Active(track) => (Some(lifecycle.activate(track, state.session.bandwidth(), pad)), true),
 		CapsOutcome::Failed(reason) => (Some(lifecycle.fail(reason)), false),
 		CapsOutcome::Unchanged => (None, true),
 	}

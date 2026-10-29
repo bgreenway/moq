@@ -6,10 +6,11 @@ use std::sync::{LazyLock, Mutex, MutexGuard};
 use gst::glib;
 use gst::prelude::*;
 use gst::subclass::prelude::*;
+use hang::moq_net;
 
 use super::MediaContainer;
 use super::pad::Pad;
-use super::session::{CAT, CompletionHandle};
+use super::session::{CAT, CompletionHandle, RUNTIME};
 
 /// What the pad's track is doing, as reported by the `track-status` property.
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, glib::Enum)]
@@ -41,16 +42,28 @@ struct Settings {
 	effective: Option<String>,
 	/// The wire container selected for this pad's media producer.
 	container: MediaContainer,
+	/// The most bits per second the encoder feeding this pad can produce. Zero takes no reservation.
+	bandwidth_ceiling: u64,
 	/// What the track is doing, read back through `status`.
 	status: Status,
 	/// The reason the pad was invalidated, read back through `track-error`.
 	error: Option<String>,
 }
 
+/// Subscriber demand and an optional share of the connection's send estimate for one live track.
+struct Bandwidth {
+	demand: moq_net::track::Demand,
+	/// Keeps the claim alive; the separate consumer can be cloned into the watcher.
+	reservation: Option<moq_net::bandwidth::Reservation>,
+	grant: Option<moq_net::bandwidth::Consumer>,
+	watch_task: Option<tokio::task::JoinHandle<()>>,
+}
+
 /// Everything owned by one request pad, protected by one lock.
 pub(super) struct PadLifecycle {
 	settings: Settings,
 	pub(super) media: Pad,
+	bandwidth: Option<Bandwidth>,
 	pub(super) ended: bool,
 	pub(super) releasing: bool,
 	/// This pad's link to its publication. `None` is no live session for the pad, which is why a buffer
@@ -63,10 +76,97 @@ impl Default for PadLifecycle {
 		Self {
 			settings: Settings::default(),
 			media: Pad::new(),
+			bandwidth: None,
 			ended: false,
 			releasing: false,
 			completion: None,
 		}
+	}
+}
+
+impl Bandwidth {
+	fn new(demand: moq_net::track::Demand, allocator: moq_net::bandwidth::Allocator, ceiling: u64) -> Self {
+		let reservation =
+			(ceiling > 0).then(|| allocator.reserve(&demand, moq_net::bandwidth::Rate::from_bps(ceiling)));
+		let grant = reservation.as_ref().map(moq_net::bandwidth::Reservation::consume);
+		Self {
+			demand,
+			reservation,
+			grant,
+			watch_task: None,
+		}
+	}
+
+	/// Start notifications after this value is installed in the lifecycle. Property getters read the
+	/// handles directly, so the tasks carry no mirrored state that could go stale.
+	fn watch(&mut self, pad: glib::WeakRef<MoqSinkPad>) {
+		let mut demand = self.demand.clone();
+		// Activation emits the initial notification synchronously. Prime this clone so the task only
+		// reports subsequent changes instead of immediately duplicating that notification.
+		let _ = demand.poll_wanted_changed(&moq_net::kio::Waiter::noop());
+		self.watch_task = Some(if let Some(mut grant) = self.grant.clone() {
+			let _ = grant.poll_changed(&moq_net::kio::Waiter::noop());
+			RUNTIME.spawn(async move {
+				loop {
+					tokio::select! {
+						result = demand.wanted_changed() => {
+							notify_demand(&pad);
+							if result.is_err() {
+								return;
+							}
+						}
+						result = grant.changed() => {
+							notify_demand(&pad);
+							if result.is_err() {
+								return;
+							}
+						}
+					}
+				}
+			})
+		} else {
+			RUNTIME.spawn(async move {
+				loop {
+					let closed = demand.wanted_changed().await.is_err();
+					notify_demand(&pad);
+					if closed {
+						return;
+					}
+				}
+			})
+		});
+	}
+
+	fn snapshot(&self) -> gst::Structure {
+		let wanted = self.demand.wanted();
+		let mut state = gst::Structure::builder("moq-track-demand").field("wanted", wanted.is_some());
+		if let Some(group) = wanted {
+			state = state.field("group", group);
+		}
+		if let Some(grant) = &self.grant {
+			state = state.field("probed", grant.probed());
+			if let Some(rate) = grant.peek() {
+				state = state.field("grant-bps", rate.as_bps());
+			}
+		}
+		state.build()
+	}
+}
+
+impl Drop for Bandwidth {
+	fn drop(&mut self) {
+		if let Some(task) = self.watch_task.take() {
+			task.abort();
+		}
+		// Abort the watcher before releasing the claim. A task already running may still notify, but the
+		// property getter reads the current lifecycle rather than stale task state.
+		self.reservation.take();
+	}
+}
+
+fn notify_demand(pad: &glib::WeakRef<MoqSinkPad>) {
+	if let Some(pad) = pad.upgrade() {
+		pad.notify("track-demand");
 	}
 }
 
@@ -76,6 +176,7 @@ pub(super) struct Notifications {
 	track: bool,
 	status: bool,
 	error: bool,
+	demand: bool,
 }
 
 /// The GObject implementation backing a named `moqsink` request pad.
@@ -104,6 +205,11 @@ impl PadLifecycle {
 		self.settings.container
 	}
 
+	/// The encoder ceiling configured for this pad, in bits per second.
+	pub(super) fn bandwidth_ceiling(&self) -> u64 {
+		self.settings.bandwidth_ceiling
+	}
+
 	/// Record the name reserved by a successful CAPS event.
 	pub(super) fn commit(&mut self, track: String) -> Notifications {
 		let before = self
@@ -116,7 +222,25 @@ impl PadLifecycle {
 			track: before != self.settings.effective,
 			status: self.settings.set_status(Status::Active),
 			error: false,
+			demand: false,
 		}
+	}
+
+	/// Commit the track and start exposing its demand and optional bandwidth reservation.
+	pub(super) fn activate(
+		&mut self,
+		track: String,
+		allocator: moq_net::bandwidth::Allocator,
+		pad: &MoqSinkPad,
+	) -> Notifications {
+		let mut changes = self.commit(track);
+		if let Some(demand) = self.media.demand() {
+			let ceiling = self.bandwidth_ceiling();
+			let bandwidth = self.bandwidth.insert(Bandwidth::new(demand, allocator, ceiling));
+			bandwidth.watch(pad.downgrade());
+			changes.demand = true;
+		}
+		changes
 	}
 
 	/// Record a terminal failure. The first reason wins: `error` is terminal for the run, so a later
@@ -146,10 +270,16 @@ impl PadLifecycle {
 		let track = before.is_some() && before != self.settings.requested;
 		let error = self.settings.error.take().is_some();
 		let status = self.settings.set_status(Status::Pending);
+		let demand = self.bandwidth.take().is_some();
 		self.media = Pad::new();
 		self.ended = false;
 		self.completion = None;
-		Notifications { track, status, error }
+		Notifications {
+			track,
+			status,
+			error,
+			demand,
+		}
 	}
 }
 
@@ -186,6 +316,17 @@ impl ObjectImpl for MoqSinkPadImp {
 					.default_value(MediaContainer::Legacy)
 					.mutable_playing()
 					.build(),
+				glib::ParamSpecUInt64::builder("bandwidth-ceiling")
+					.nick("Bandwidth ceiling")
+					.blurb(
+						"Maximum bitrate in bits per second for the encoder feeding this track. A \
+						 nonzero value reserves a fair share of the connection estimate and exposes \
+						 it through track-demand; zero observes demand without taking a reservation. \
+						 Writable until CAPS reserves the track",
+					)
+					.default_value(0)
+					.mutable_playing()
+					.build(),
 				glib::ParamSpecEnum::builder::<Status>("track-status")
 					.nick("Status")
 					.blurb(
@@ -200,6 +341,15 @@ impl ObjectImpl for MoqSinkPadImp {
 					.blurb(
 						"Why this pad was invalidated, or null when it was not. Set with status=error \
 						 and cleared when the pad is released or the element goes back to READY",
+					)
+					.read_only()
+					.build(),
+				glib::ParamSpecBoxed::builder::<gst::Structure>("track-demand")
+					.nick("Track demand")
+					.blurb(
+						"Current subscriber demand and optional bandwidth grant. Null before the track \
+						 is active; otherwise a moq-track-demand structure with wanted, optional group, \
+						 and, when bandwidth-ceiling is nonzero, probed and optional grant-bps fields",
 					)
 					.read_only()
 					.build(),
@@ -219,8 +369,8 @@ impl ObjectImpl for MoqSinkPadImp {
 			);
 			return;
 		}
-		// A producer keeps its reserved name and wire container for its whole life, so a later write
-		// would read back without ever reaching the broadcast or the catalog.
+		// A producer keeps its setup for its whole life, so a later write would read back without ever
+		// reaching the live track or its reservation.
 		if lifecycle.settings.effective.is_some() {
 			gst::warning!(
 				CAT,
@@ -236,6 +386,7 @@ impl ObjectImpl for MoqSinkPadImp {
 				lifecycle.settings.requested = value.get::<Option<String>>().unwrap().filter(|name| !name.is_empty())
 			}
 			"container" => lifecycle.settings.container = value.get().unwrap(),
+			"bandwidth-ceiling" => lifecycle.settings.bandwidth_ceiling = value.get().unwrap(),
 			_ => unreachable!(),
 		}
 	}
@@ -250,8 +401,10 @@ impl ObjectImpl for MoqSinkPadImp {
 				.or_else(|| lifecycle.settings.requested.clone())
 				.to_value(),
 			"container" => lifecycle.settings.container.to_value(),
+			"bandwidth-ceiling" => lifecycle.settings.bandwidth_ceiling.to_value(),
 			"track-status" => lifecycle.settings.status.to_value(),
 			"track-error" => lifecycle.settings.error.clone().to_value(),
+			"track-demand" => lifecycle.bandwidth.as_ref().map(Bandwidth::snapshot).to_value(),
 			_ => unreachable!(),
 		}
 	}
@@ -281,6 +434,9 @@ impl MoqSinkPad {
 		}
 		if changes.error {
 			self.notify("track-error");
+		}
+		if changes.demand {
+			self.notify("track-demand");
 		}
 	}
 
@@ -389,11 +545,15 @@ mod tests {
 			.name("sink_0")
 			.build();
 		assert_eq!(pad.property::<MediaContainer>("container"), MediaContainer::Legacy);
+		assert_eq!(pad.property::<u64>("bandwidth-ceiling"), 0);
+		assert!(pad.property::<Option<gst::Structure>>("track-demand").is_none());
 		pad.set_property("track", "camera");
 		pad.set_property("container", MediaContainer::Loc);
+		pad.set_property("bandwidth-ceiling", 4_000_000u64);
 
 		assert_eq!(pad.lifecycle().requested(), Some("camera"));
 		assert_eq!(pad.lifecycle().container(), MediaContainer::Loc);
+		assert_eq!(pad.lifecycle().bandwidth_ceiling(), 4_000_000);
 		pad.set_property("track", "other");
 		assert_eq!(pad.property::<String>("track"), "other");
 		pad.set_property("track", "camera");
@@ -414,14 +574,48 @@ mod tests {
 
 		pad.set_property("track", "other");
 		pad.set_property("container", MediaContainer::Legacy);
+		pad.set_property("bandwidth-ceiling", 8_000_000u64);
 		assert_eq!(pad.property::<MediaContainer>("container"), MediaContainer::Loc);
+		assert_eq!(pad.property::<u64>("bandwidth-ceiling"), 4_000_000);
 		apply(&pad, PadLifecycle::reset);
 		pad.set_property("container", MediaContainer::Legacy);
+		pad.set_property("bandwidth-ceiling", 8_000_000u64);
 		assert_eq!(
 			pad.property::<String>("track"),
 			"camera",
 			"the write rejected after reservation was not retained for the next run"
 		);
 		assert_eq!(pad.property::<MediaContainer>("container"), MediaContainer::Legacy);
+		assert_eq!(pad.property::<u64>("bandwidth-ceiling"), 8_000_000);
+	}
+
+	#[test]
+	fn track_demand_preserves_unavailable_and_zero_grants() {
+		let pad = sink_pad();
+		let estimate = moq_net::bandwidth::Producer::new();
+		let allocator = moq_net::bandwidth::Allocator::new(estimate.consume());
+		let broadcast = moq_net::broadcast::Info::default().produce();
+		let track = broadcast.create_track("camera", moq_net::track::Info::timed()).unwrap();
+		pad.lifecycle().bandwidth = Some(Bandwidth::new(track.demand(), allocator, 4_000_000));
+
+		let state = pad.property::<gst::Structure>("track-demand");
+		assert_eq!(state.get::<bool>("wanted"), Ok(false));
+		assert!(!state.has_field("group"));
+		assert!(!state.has_field("grant-bps"), "an unavailable estimate is absent");
+		assert_eq!(state.get::<bool>("probed"), Ok(false));
+
+		estimate.set(Some(moq_net::bandwidth::Rate::ZERO)).unwrap();
+		let state = pad.property::<gst::Structure>("track-demand");
+		assert_eq!(state.get::<u64>("grant-bps"), Ok(0), "a real zero remains present");
+
+		estimate
+			.set(Some(moq_net::bandwidth::Rate::from_bps(2_000_000)))
+			.unwrap();
+		let subscriber = track.subscribe(None);
+		let state = pad.property::<gst::Structure>("track-demand");
+		assert_eq!(state.get::<bool>("wanted"), Ok(true));
+		assert_eq!(state.get::<u64>("group"), Ok(0));
+		assert_eq!(state.get::<u64>("grant-bps"), Ok(2_000_000));
+		drop(subscriber);
 	}
 }
