@@ -1077,7 +1077,7 @@ pub(crate) mod tests {
 	/// A source for the broadcast at `path`, resolved through `origin`.
 	async fn resolved(origin: &moq_net::origin::Producer, path: &str) -> moq_mux::Source {
 		let consumer = origin.consume();
-		let broadcast = consumer.request_broadcast(path, None).await.unwrap();
+		let broadcast = consumer.request(path, None).await.unwrap();
 		moq_mux::Source::new(consumer, broadcast)
 	}
 
@@ -1341,7 +1341,7 @@ pub(crate) mod tests {
 			// the lead holds; the jump is in the copy after it.
 			const WAIT: Duration = Duration::from_secs(10);
 			decoder.decode_chunk(&lead).unwrap();
-			let consumer = tokio::time::timeout(WAIT, remote.consume().routed_broadcast("pt.hang"))
+			let consumer = tokio::time::timeout(WAIT, remote.consume().follow("pt.hang", None).unwrap().available())
 				.await
 				.unwrap()
 				.unwrap();
@@ -1786,7 +1786,7 @@ pub(crate) mod tests {
 				resolved = async {
 					let event = announced.next().await.expect("origin closed");
 					assert!(matches!(event, moq_net::announce::Event::Start(_)), "{event:?}");
-					let broadcast = consumer.request_broadcast("demo", None).await.unwrap();
+					let broadcast = consumer.request("demo", None).await.unwrap();
 					let mut catalogs = hang::catalog::Catalog::<()>::subscribe(&broadcast).await.unwrap();
 					let catalog = catalogs.next().await.unwrap().expect("a catalog");
 					// A passthrough carries the multiplex on one track, named by its m2ts section.
