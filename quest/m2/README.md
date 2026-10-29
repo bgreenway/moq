@@ -122,6 +122,7 @@ lite-07; bitrate enforcement is not part of this release.
 - [Resume as producer replacement](/quest/m2/resume-redesign.md) - route changes replace the writer of one track state, deleting the per-reader resume path in Rust and JS
 - [moq-transport requests end through one lease](/quest/m2/ietf-request-lease.md) - every IETF request ends through one polled lease, and the two 18k-line files split by mechanism
 - [A moq-transport group head fills its hole in place](/quest/m2/ietf-fill-refill.md) - fills and joining FETCHes write into the tail's group, deleting the `Fill` handoff
+- [Track publication is one state](/quest/m2/track-publication-state.md) - one enum replaces the published, staged, and claimed flags on `TrackState`
 - [moq-transport hole markers](/quest/m2/ietf-hole-marker.md) - a negotiated extension names a SUBSCRIBE's holes, so our publishers answer multi-group FETCH from caches that know every group
 - [Announce interest streams share one route table](/quest/m2/announce-interest-memory.md) - per-stream announce cost follows what is in flight, not every route
 - [One relay serve path for every runtime](/quest/m2/relay-serve-path.md) - io_uring serves through the shared `Connection::serve` and config mapping
@@ -141,6 +142,8 @@ lite-07; bitrate enforcement is not part of this release.
 - [Hang contribution references](/quest/m2/contribution-ref.md) - a catalog names a whole contribution broadcast that a player opens only when selected, backing moq.pro's composed rooms
 - [Synced data playback](/quest/m2/watch-data-sync.md) - js/watch releases JSON and binary payloads on the media playhead, and a slow data track holds media back
 - [Watch decode gate](/quest/m2/watch-decode-gate.md) - video lookahead stays encoded until it is near presentation, like audio
+- [One support probe for watch audio and video](/quest/m2/watch-support-probe.md) - one probe helper with video's cache, and audio reports unsupported renditions
+- [Shared fullscreen, formatters, and stats cards in @moq/ui](/quest/m2/ui-shared-controls.md) - watch and publish stop keeping copies of their shared controls
 - [moqsrc A/V sync](/quest/m2/moqsrc-av-sync.md) - a nightly test measures A/V skew from `moqsrc` through clock-synced sinks
 - [MP4 export](/quest/m2/mp4-export.md) - `moq export mp4 --output` records crash-safe fragments, then finishes a regular MP4 with moov at the end
 - [Importers fill the VR fields](/quest/m2/mux-vr-fields.md) - MP4, Matroska, and Opus imports set the catalog's projection, stereo, and ambisonic layout
@@ -230,6 +233,7 @@ lite-07; bitrate enforcement is not part of this release.
 - [Dependency and alternatives audit](/quest/m2/audit-deps.md) - dependencies are current, deduplicated, needed, and the best maintained option
 - [Dead code and API surface audit](/quest/m2/audit-dead-code.md) - repeat the removal audit before the next major release
 - [Typecheck with bun check](/quest/m2/bun-check.md) - workspace packages typecheck through bun once nixpkgs ships bun 1.4.4
+- [Declare each check module once in the dispatcher](/quest/m2/dispatch-modules.md) - one registration call per module replaces its parallel tables
 - [Upgrade Biome to 2.6](/quest/m2/biome-2-6.md) - the workspace runs Biome 2.6.4+ with its new formatters off and no file reformatted
 - [Format YAML with Biome](/quest/m2/biome-yaml.md) - `just check` fails on unformatted YAML
 - [Format Markdown with Biome](/quest/m2/biome-markdown.md) - Biome formats every Markdown file and remark is gone, landed in a quiet window
@@ -242,6 +246,7 @@ lite-07; bitrate enforcement is not part of this release.
 - [Performance audit](/quest/m2/audit-perf.md) - benchmarks that regressed since the m1 run are explained, fixed, or planned, and unbenched hot paths get coverage
 - [Simplification audit](/quest/m2/audit-simplify.md) - repeat the simplification audit, starting with the m1 leftovers, after the release ships
 - [Upstream unknown-env option in usage-rs](/quest/m2/usage-unknown-env.md) - jdx/usage refuses unknown prefixed env vars, replacing the moq-tokio helper
+- [Upstream single-declaration settings in usage-rs](/quest/m2/usage-settings-once.md) - waiting on approval to post, then jdx/usage builds the registry from Cli fields
 - [Artifact size audit](/quest/m2/audit-size.md) - repeat the shipping, native, WASM and browser attribution after the release ships
 - [Compile time audit](/quest/m2/audit-compile-time.md) - build-time hotspots are measured against the m1 baselines, starting with the transport share now that moq-net compiles once, and the worst are fixed or planned
 - [Lint override and deprecation audit](/quest/m2/audit-lints.md) - repeat the suppression and deprecation audit after the release ships, starting with clippy on the macOS and Windows targets
