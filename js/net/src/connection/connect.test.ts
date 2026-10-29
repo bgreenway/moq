@@ -466,6 +466,8 @@ test("a client refuses an IETF version selected in the moql SETUP", async () => 
 test("a server refuses a client offering only IETF versions in the moql SETUP", async () => {
 	const pair = createMockTransportPair("");
 	const accepting = accept({ url, transport: pair.server });
+	// Handled now, since the refusal can land while the write below yields.
+	accepting.catch(() => {});
 	const stream = await Stream.open(pair.client, { version: Lite.DRAFT_02 });
 	await new ClientSetup([DRAFT_14]).encode(stream.writer);
 	await expect(accepting).rejects.toThrow("no common version found; client offered: ff00000e");

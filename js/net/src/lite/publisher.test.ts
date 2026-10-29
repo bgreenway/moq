@@ -1550,13 +1550,17 @@ test("lite draft-06: a newer update wins before a buffered group backlog drains"
 		startGroup: 0,
 		gated: true,
 	});
+	// Encoded up front, so the second update arrives whole the way a peer's would.
+	const capped = await Writer.collect(Version.DRAFT_06, (w) =>
+		replayUpdate({ priority: 0, endGroup: 1 }).encode(w, Version.DRAFT_06),
+	);
 	let second!: Promise<void>;
 	const withRange = TrackSubscriber.prototype.withRange;
 	const ranges = spyOn(TrackSubscriber.prototype, "withRange").mockImplementation(function (
 		this: TrackSubscriber,
 		groups,
 	) {
-		second ??= replayUpdate({ priority: 0, endGroup: 1 }).encode(sub.client.writer, Version.DRAFT_06);
+		second ??= sub.client.writer.write(capped);
 		return withRange.call(this, groups);
 	});
 

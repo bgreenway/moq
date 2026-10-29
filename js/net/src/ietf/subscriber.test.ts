@@ -762,6 +762,35 @@ async function subscribeTrack({
 	return { subscriber, track };
 }
 
+// A refusal already ended the request: a reset back would tell the publisher we failed.
+test("a refused SUBSCRIBE or SUBSCRIBE_NAMESPACE ends its stream cleanly", async () => {
+	const pair = createMockTransportPair(ALPN.DRAFT_18);
+	const subscriber = new Subscriber({ session: new NativeSession(pair.server, VERSION, true) });
+	const refuse = async (peer: Stream) => {
+		await peer.writer.u53(RequestError.id);
+		await new RequestError({ errorCode: 0x10, reasonPhrase: "not here" }).encode(peer.writer, VERSION);
+		peer.writer.close();
+	};
+
+	const announced = subscriber.announced();
+	const namespace = await nextStream(pair.client);
+	if (!namespace) throw new Error("no SUBSCRIBE_NAMESPACE was sent");
+	expect(await namespace.reader.u53()).toBe(SubscribeNamespace.id);
+	await SubscribeNamespace.decode(namespace.reader, VERSION);
+	await refuse(namespace);
+	expect(await namespace.reader.done()).toBe(true);
+	announced.close();
+
+	const track = subscriber.consume(Path.from("room")).track("video").subscribe();
+	const subscribe = await nextStream(pair.client);
+	if (!subscribe) throw new Error("no SUBSCRIBE was sent");
+	expect(await subscribe.reader.u53()).toBe(Subscribe.id);
+	await Subscribe.decode(subscribe.reader, VERSION);
+	await refuse(subscribe);
+	expect(await subscribe.reader.done()).toBe(true);
+	track.close();
+});
+
 /** One object carrying `properties` as its raw extension bytes, then a one-byte payload. */
 function encodeStamped(properties: number[]): Uint8Array {
 	// Every field here is under 64, so each is a one-byte varint.
