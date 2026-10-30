@@ -257,12 +257,7 @@ impl PadLifecycle {
 		pad: &MoqSinkPad,
 	) -> Notifications {
 		let mut changes = self.commit(track);
-		if let Some(demand) = self.media.demand() {
-			let ceiling = self.bandwidth_ceiling();
-			let bandwidth = self.bandwidth.insert(Bandwidth::new(demand, allocator, ceiling));
-			bandwidth.watch(pad.downgrade());
-			changes.demand = true;
-		}
+		changes.demand = self.restore_bandwidth(allocator, pad).is_some();
 		changes
 	}
 

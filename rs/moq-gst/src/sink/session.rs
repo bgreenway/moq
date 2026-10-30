@@ -356,6 +356,11 @@ impl Session {
 		self.bandwidth.clone()
 	}
 
+	#[cfg(test)]
+	pub(super) fn replace_bandwidth(&mut self, bandwidth: moq_net::bandwidth::Allocator) {
+		self.bandwidth = bandwidth;
+	}
+
 	/// Snapshot the current connection statistics, or None while disconnected.
 	pub fn connection_stats(&self) -> Option<gst::Structure> {
 		self.connection_stats

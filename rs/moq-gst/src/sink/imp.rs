@@ -67,8 +67,6 @@ impl TryFrom<Settings> for ResolvedSettings {
 /// Live state for one READY to PAUSED run.
 struct State {
 	session: Session,
-	/// One allocator shared by every track in this publication and retained across reconnects.
-	bandwidth: moq_net::bandwidth::Allocator,
 	broadcast: moq_net::origin::Publication,
 	catalog: Option<moq_mux::catalog::Producer>,
 	wall: std::sync::Arc<super::wall::Wall>,
@@ -578,13 +576,11 @@ impl MoqSink {
 				gst::StateChangeError
 			})?;
 		let completion = session.completion();
-		let bandwidth = session.bandwidth();
 		let wall = super::wall::Wall::new(&catalog);
 		let updates = {
 			let mut control = self.control.lock().unwrap();
 			control.live = Some(State {
 				session,
-				bandwidth,
 				broadcast,
 				catalog: Some(catalog),
 				wall,
@@ -932,7 +928,7 @@ impl MoqSink {
 									let changes = caps.zip(catalog).and_then(|(caps, catalog)| {
 										observe_caps(state, catalog, sink_pad, &mut lifecycle, &caps).0
 									});
-									changes.or_else(|| lifecycle.restore_bandwidth(state.bandwidth.clone(), sink_pad))
+									changes.or_else(|| lifecycle.restore_bandwidth(state.session.bandwidth(), sink_pad))
 								}
 							}
 						}
@@ -1232,7 +1228,7 @@ fn observe_caps(
 	let outcome = lifecycle.media.observe_caps(&state.broadcast, catalog, options);
 	lifecycle.completion = Some(state.session.completion());
 	match outcome {
-		CapsOutcome::Active(track) => (Some(lifecycle.activate(track, state.bandwidth.clone(), pad)), true),
+		CapsOutcome::Active(track) => (Some(lifecycle.activate(track, state.session.bandwidth(), pad)), true),
 		CapsOutcome::Failed(reason) => (Some(lifecycle.fail(reason)), false),
 		CapsOutcome::Unchanged => (None, true),
 	}
@@ -1626,8 +1622,16 @@ mod tests {
 		estimate
 			.set(Some(moq_net::bandwidth::Rate::from_bps(4_000_000)))
 			.unwrap();
-		run.0.imp().control.lock().unwrap().live.as_mut().unwrap().bandwidth =
-			moq_net::bandwidth::Allocator::new(estimate.consume());
+		run.0
+			.imp()
+			.control
+			.lock()
+			.unwrap()
+			.live
+			.as_mut()
+			.unwrap()
+			.session
+			.replace_bandwidth(moq_net::bandwidth::Allocator::new(estimate.consume()));
 
 		assert!(negotiate(&first, &h264_caps()));
 		assert!(negotiate(&second, &h264_caps()));
