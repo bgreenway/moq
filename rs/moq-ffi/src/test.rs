@@ -3288,10 +3288,8 @@ async fn announced_filters_patterns_and_reports_captures() {
 		})
 		.unwrap();
 
+	// A claim at `room` could serve a match, but its own name is none, so it is not listed.
 	let _broad = origin.requests("room".into()).unwrap();
-	let overlap = next_announced(&announced).await;
-	assert_eq!(overlap.prefix, "room");
-	assert_eq!(overlap.captures, None, "an overlap does not pin the wildcard");
 
 	let chat = create_announced(&origin, "room/alice/chat");
 	let _audio = create_announced(&origin, "room/alice/audio");

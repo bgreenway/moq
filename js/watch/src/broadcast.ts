@@ -46,7 +46,7 @@ function provesOther(active: Moq.Broadcast.Consumer | undefined, epoch: Moq.Epoc
 // under a `.`-named prefix is kept out of listings, but it still covers the renditions it would
 // produce, and this is never shown to anyone.
 function watchCovered(origin: Moq.Origin.Table, path: Moq.Path.Valid): { covered: Getter<boolean>; close: () => void } {
-	const announced = origin.announced(Path.Pattern.literal(path), { hidden: true });
+	const announced = origin.announced(Path.Pattern.literal(path), { hidden: true, covering: true });
 	const covered = new Signal(false);
 	const active = new Set<Moq.Path.Valid>();
 	void (async () => {

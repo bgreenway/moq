@@ -50,7 +50,7 @@ async def main():
             if not isinstance(event, (moq.AnnounceEventStart, moq.AnnounceEventRestart)):
                 continue  # AnnounceEventUpdate or AnnounceEventEnd
             announcement = event.announce
-            print(announcement.captures)  # what * matched, or None for a partial overlap
+            print(announcement.captures)  # what * matched
             broadcast = await client.request(announcement.prefix)
             catalog = await moq.media.catalog(broadcast)
             id, audio = next(iter(catalog.audio.items()))

@@ -1652,11 +1652,8 @@ async def test_announced_pattern_captures():
     consumer = origin.consume()
     announced = consumer.announced("room", filter="*/chat")
 
+    # A claim at "room" could serve a match, but its own name is none, so it is not listed.
     dynamic = origin.requests("room")
-    overlap = await next_route(announced)
-    assert isinstance(overlap, moq.AnnounceEventStart)
-    assert overlap.announce.prefix == "room"
-    assert overlap.announce.captures is None
 
     audio = create_announced(origin, "room/alice/audio")
     chat = create_announced(origin, "room/alice/chat")

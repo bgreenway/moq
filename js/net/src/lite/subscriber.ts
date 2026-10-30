@@ -269,6 +269,9 @@ export class Subscriber {
 	 * Hidden routes (a `.`-prefixed segment below the scope's head) are left out unless
 	 * `options.hidden` opts in. The opt-in rides the request on lite-07+; an older peer
 	 * never hides anything, so the rule is also applied here.
+	 *
+	 * Only routes whose literal name matches `scope` are reported, unless `options.covering`
+	 * also asks for those whose subtree overlaps it.
 	 */
 	announced(scope: Path.Pattern = Path.Pattern.all(), options?: announce.Options): announce.Consumer {
 		const announced = new announce.Producer();
@@ -276,7 +279,13 @@ export class Subscriber {
 		const consumer = announced.consume();
 		// The last reader leaving ends the stream, which cancels the request.
 		closeUnwanted(announced);
-		void this.#runAnnounced(announced, scopeHead(scope), scope, options?.hidden ?? false);
+		void this.#runAnnounced(
+			announced,
+			scopeHead(scope),
+			scope,
+			options?.hidden ?? false,
+			options?.covering ?? false,
+		);
 		return consumer;
 	}
 
@@ -285,6 +294,7 @@ export class Subscriber {
 		prefix: Path.Valid,
 		scope: Path.Pattern,
 		hidden: boolean,
+		covering: boolean,
 	): Promise<void> {
 		console.debug(`announced: prefix=${prefix}`);
 		// Lite04/05: send our own session-level Hop ID so the peer can skip announces
@@ -292,7 +302,8 @@ export class Subscriber {
 		// version, where we drop the reflected announce on receipt instead. Matches the
 		// Rust subscriber's `exclude_hop: self.self_origin.id` in `run_announce_prefix`.
 		const msg = new AnnounceRequest(prefix, this.hop, hidden);
-		const visible = (path: Path.Valid) => scopeOverlaps(scope, path) && (hidden || !hiddenBelow(prefix, path));
+		const visible = (path: Path.Valid) =>
+			(covering ? scopeOverlaps(scope, path) : scope.matches(path)) && (hidden || !hiddenBelow(prefix, path));
 
 		// Opened outside the try so the catch can reach it: a protocol violation below has
 		// to reset the stream, not just close our side of it.

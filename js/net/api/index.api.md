@@ -24,6 +24,7 @@ export namespace Announce {
 		kind: "start" | "update" | "restart" | "end";
 	} & Announce.Announce;
 	export interface Options {
+		covering?: boolean;
 		hidden?: boolean;
 	}
 }
