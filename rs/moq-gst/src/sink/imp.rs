@@ -1675,6 +1675,8 @@ mod tests {
 			.consume();
 		let _first_reader = broadcast.track("first").unwrap().subscribe(None);
 		let _second_reader = broadcast.track("second").unwrap().subscribe(None);
+		video_frame(&first);
+		video_frame(&second);
 		let grant = |pad: &gst::Pad| {
 			pad.property::<Option<gst::Structure>>("track-demand")
 				.expect("active demand")
@@ -1697,7 +1699,11 @@ mod tests {
 		let resumed = first
 			.property::<Option<gst::Structure>>("track-demand")
 			.expect("the resumed track restores demand reporting");
-		assert_eq!(resumed.get::<bool>("wanted"), Ok(false));
+		assert_eq!(
+			resumed.get::<bool>("wanted"),
+			Ok(true),
+			"the retained producer keeps its subscriber across EOS and resume"
+		);
 		assert_eq!(
 			resumed.get::<u64>("grant-bps"),
 			Ok(2_000_000),
@@ -1705,8 +1711,8 @@ mod tests {
 		);
 		assert_eq!(
 			grant(&second),
-			4_000_000,
-			"an idle reservation does not tax its live sibling"
+			2_000_000,
+			"the resumed watched track again shares the estimate with its sibling"
 		);
 	}
 
