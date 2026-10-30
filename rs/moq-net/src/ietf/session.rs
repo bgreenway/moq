@@ -967,10 +967,11 @@ impl Uni {
 				let res = subscriber.recv_fill(&mut reader).await;
 				stop_on_error(&mut reader, res)?;
 			}
-			// The receiver MUST discard padding. We read it to the end rather than cancel,
-			// so a peer probing for bandwidth gets the throughput it is measuring.
+			// The receiver MUST discard padding. One that dies is not the session's failure.
 			UniType::Padding => {
-				while let Ok(Some(_)) = kio::wait(|waiter| reader.poll_read_chunk(waiter, usize::MAX)).await {}
+				if let Err(err) = kio::wait(|waiter| reader.poll_discard(waiter)).await {
+					tracing::debug!(%err, "padding stream ended");
+				}
 			}
 		}
 		Ok(())
@@ -999,7 +1000,10 @@ async fn run_datagrams(session: Transport, subscriber: Subscriber) -> Result<(),
 	if session.max_datagram_size() == 0 {
 		return Ok(());
 	}
+	// A peer keeping datagrams ready must not hold the session's other tasks.
+	let mut budget = kio::coop::Budget::new(32);
 	loop {
+		kio::wait(|waiter| budget.poll_yield(waiter)).await;
 		let payload = session.recv_datagram().await.map_err(Error::from_transport)?;
 		subscriber.recv_datagram(payload)?;
 	}

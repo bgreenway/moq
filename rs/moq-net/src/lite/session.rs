@@ -634,6 +634,7 @@ impl kio::Task for PresentToken {
 impl PresentToken {
 	/// Run the stream, resolving with why the token ended.
 	fn poll_present(&mut self, waiter: &kio::Waiter) -> Poll<Error> {
+		let mut budget = kio::coop::Budget::new(32);
 		loop {
 			match &mut self.state {
 				PresentState::Open { token, answered } => {
@@ -691,6 +692,9 @@ impl PresentToken {
 									expires,
 								},
 							);
+							// Each grant recomputes the session's permits, so a peer streaming
+							// them must not hold the session's other tasks.
+							ready!(budget.poll_yield(waiter));
 						}
 						super::AuthReply::Error(refused) => {
 							// Session codes are u32 everywhere else, so a wider one is malformed.
@@ -732,7 +736,10 @@ impl PresentToken {
 /// the stream dies (a FIN counts: the peer abandoned the session).
 // TODO do something useful with the updates
 fn poll_session_stream(stream: &mut Stream<Transport, Version>, waiter: &kio::Waiter) -> Poll<Error> {
+	// A yield only skips this arm: the rest of the driver still runs this turn.
+	let mut budget = kio::coop::Budget::new(32);
 	loop {
+		ready!(budget.poll_yield(waiter));
 		match ready!(stream.reader.poll_decode_maybe::<SessionInfo>(waiter)) {
 			Ok(Some(_info)) => {}
 			Ok(None) => return Poll::Ready(Error::Cancel),

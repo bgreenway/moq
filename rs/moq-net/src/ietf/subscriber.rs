@@ -1510,11 +1510,14 @@ impl Subscriber {
 			false => writer.abort(&Error::Cancel),
 		}
 		let session = self.session.clone();
+		// A peer still streaming entries must not hold the session's other tasks.
+		let mut budget = kio::coop::Budget::new(32);
 		kio::wait(|waiter| {
 			if session.poll_closed(waiter).is_ready() {
 				return Poll::Ready(());
 			}
 			loop {
+				ready!(budget.poll_yield(waiter));
 				match ready!(messages.poll_next(&mut reader, waiter)) {
 					Ok(Some(_)) => continue,
 					Ok(None) | Err(_) => return Poll::Ready(()),
@@ -1537,7 +1540,11 @@ impl Subscriber {
 		mut initial: Initial,
 		live: &kio::Consumer<()>,
 	) -> Result<namespaces::Ended, Error> {
+		// Each entry routes into the origin, so a peer streaming them must not hold the
+		// session's other tasks.
+		let mut budget = kio::coop::Budget::new(32);
 		loop {
+			kio::wait(|waiter| budget.poll_yield(waiter)).await;
 			// Every counted NAMESPACE is in the origin by now, dropped ones included.
 			if initial.initial == 0 {
 				initial.snapshot = None;
@@ -2004,7 +2011,11 @@ impl Subscriber {
 
 		// Request IDs of updates queued behind a pending verdict, already spent.
 		let mut spent = std::collections::HashSet::new();
+		// Each update re-routes in the origin and is answered, so a peer streaming them must
+		// not hold the session's other tasks.
+		let mut budget = kio::coop::Budget::new(32);
 		loop {
+			kio::wait(|waiter| budget.poll_yield(waiter)).await;
 			// Handle one buffered update before reading the next, so answers stay in order.
 			let turn = if let Some((id, body)) = renewal.next() {
 				Turn::Message(id, body)
@@ -5978,9 +5989,13 @@ impl GroupIngest {
 		group: &mut crate::recv::Group,
 		waiter: &kio::Waiter,
 	) -> Poll<Result<Ended, Error>> {
+		// An empty object is a few bytes, so a peer keeping them ready must not hold the
+		// session's other tasks.
+		let mut budget = kio::coop::Budget::new(32);
 		loop {
 			match &mut self.phase {
 				IngestPhase::Delta => {
+					ready!(budget.poll_yield(waiter));
 					let Some(id_delta) = ready!(reader.poll_varint_maybe(waiter))? else {
 						return Poll::Ready(Ok(Ended::Group));
 					};
