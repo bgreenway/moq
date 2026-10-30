@@ -71,7 +71,7 @@ Decided 2026-10-26 (maintainer), from 414 queue merges over 2026-10-23 to
 (about 1 minute per merge), with a median of 18 entries ahead and 12.7% of
 runs failing. GitHub's merge queue cannot test several PRs in one run, so a
 batched gate replaces it on the one self-hosted runner: `quest land`, shared
-through kixelated/quest, lands a tested chain of squash commits by
+through moq-dev/quest, lands a tested chain of squash commits by
 fast-forward ([land](/quest/m0/ci/land.md)). This supersedes concurrent queue
 entries on a second runner. Batching gains most when failures are rare, so the
 [flake epic](/quest/m0/test-flakes-2/README.md) moved to m0 and
@@ -108,7 +108,7 @@ so the work is making builds identical enough to hit it (flags in
 `.cargo/config.toml`, cargo-hakari), and auditing the package selection `just ci`
 already does. Nix builds run sandboxed and cannot reach R2, so they stay on crane
 for packaging only; CI builds with cargo and mbx. Decided 2026-10-26 from
-kixelated/rust2's [Nix build benchmark](https://github.com/kixelated/rust2/pull/63),
+moq-dev/rust2's [Nix build benchmark](https://github.com/moq-dev/rust2/pull/63),
 in billions of instructions over a clean build, a second package, the moq-net edit,
 and a lockfile bump: cargo with mbx totals 9,692 and crane 14,756. crate2nix built
 to the release profile totals 14,538: it wins only the lockfile bump (1,255 against
@@ -118,7 +118,7 @@ Decided 2026-10-25 (maintainer), from a profile of moq-net: monomorphized
 generics dominate its build (53% of the library's CPU), and its test target
 costs 3x the library. A "thin generics" profile shrinks them: generic entry
 points delegate to non-generic bodies, and BTreeMap instantiations are shared.
-kixelated/rust2's driver lints the rule later. Making IETF support a cargo
+moq-dev/rust2's driver lints the rule later. Making IETF support a cargo
 feature was considered and not planned: the churn outweighs the build saving.
 
 Measure each change against a current baseline and record the result in its PR.
