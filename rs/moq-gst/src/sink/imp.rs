@@ -67,6 +67,8 @@ impl TryFrom<Settings> for ResolvedSettings {
 /// Live state for one READY to PAUSED run.
 struct State {
 	session: Session,
+	/// One allocator shared by every track in this publication and retained across reconnects.
+	bandwidth: moq_net::bandwidth::Allocator,
 	broadcast: moq_net::origin::Publication,
 	catalog: Option<moq_mux::catalog::Producer>,
 	wall: std::sync::Arc<super::wall::Wall>,
@@ -576,11 +578,13 @@ impl MoqSink {
 				gst::StateChangeError
 			})?;
 		let completion = session.completion();
+		let bandwidth = session.bandwidth();
 		let wall = super::wall::Wall::new(&catalog);
 		let updates = {
 			let mut control = self.control.lock().unwrap();
 			control.live = Some(State {
 				session,
+				bandwidth,
 				broadcast,
 				catalog: Some(catalog),
 				wall,
@@ -851,6 +855,7 @@ impl MoqSink {
 				gst::Pad::event_default(pad, Some(&*self.obj()), event)
 			}
 			gst::EventView::Eos(_) => {
+				let mut retired = None;
 				let finished = {
 					let mut control = self.control.lock().unwrap();
 					if let Some(state) = control.live.as_ref().filter(|state| state.is_open()) {
@@ -858,6 +863,7 @@ impl MoqSink {
 						let mut lifecycle = sink_pad.lifecycle();
 						if !lifecycle.releasing {
 							lifecycle.ended = true;
+							retired = lifecycle.retire_bandwidth();
 							if let Some(catalog) = &state.catalog
 								&& let Err(err) = lifecycle.media.end_unresolved(catalog)
 							{
@@ -865,6 +871,9 @@ impl MoqSink {
 								let changes = lifecycle.fail(format!("{err:#}"));
 								drop(lifecycle);
 								drop(control);
+								if let Some(retired) = retired {
+									sink_pad.notify_changes(retired);
+								}
 								sink_pad.notify_changes(changes);
 								return false;
 							}
@@ -872,6 +881,9 @@ impl MoqSink {
 					}
 					self.maybe_finish_locked(&mut control)
 				};
+				if let Some(retired) = retired {
+					sink_pad.notify_changes(retired);
+				}
 				self.publish_finished(finished);
 				gst::Pad::event_default(pad, Some(&*self.obj()), event)
 			}
@@ -917,9 +929,10 @@ impl MoqSink {
 										lifecycle.media.reserve(catalog, state.wall.clone(), &state.names);
 									}
 									let caps = lifecycle.media.resumable_caps();
-									caps.zip(catalog).and_then(|(caps, catalog)| {
+									let changes = caps.zip(catalog).and_then(|(caps, catalog)| {
 										observe_caps(state, catalog, sink_pad, &mut lifecycle, &caps).0
-									})
+									});
+									changes.or_else(|| lifecycle.restore_bandwidth(state.bandwidth.clone(), sink_pad))
 								}
 							}
 						}
@@ -1219,7 +1232,7 @@ fn observe_caps(
 	let outcome = lifecycle.media.observe_caps(&state.broadcast, catalog, options);
 	lifecycle.completion = Some(state.session.completion());
 	match outcome {
-		CapsOutcome::Active(track) => (Some(lifecycle.activate(track, state.session.bandwidth(), pad)), true),
+		CapsOutcome::Active(track) => (Some(lifecycle.activate(track, state.bandwidth.clone(), pad)), true),
 		CapsOutcome::Failed(reason) => (Some(lifecycle.fail(reason)), false),
 		CapsOutcome::Unchanged => (None, true),
 	}
@@ -1598,6 +1611,72 @@ mod tests {
 		);
 		assert!(first.video.renditions.contains_key("pending"));
 		assert!(completion_of(&run.0).is_open());
+	}
+
+	#[test]
+	fn individual_eos_releases_and_resume_restores_its_bandwidth() {
+		let run = CatalogRun::new();
+		let first = run.pad("first");
+		let second = run.pad("second");
+		first.set_property("bandwidth-ceiling", 4_000_000u64);
+		second.set_property("bandwidth-ceiling", 4_000_000u64);
+		let _catalog = run.start();
+
+		let estimate = moq_net::bandwidth::Producer::new();
+		estimate
+			.set(Some(moq_net::bandwidth::Rate::from_bps(4_000_000)))
+			.unwrap();
+		run.0.imp().control.lock().unwrap().live.as_mut().unwrap().bandwidth =
+			moq_net::bandwidth::Allocator::new(estimate.consume());
+
+		assert!(negotiate(&first, &h264_caps()));
+		assert!(negotiate(&second, &h264_caps()));
+		let broadcast = run
+			.0
+			.imp()
+			.control
+			.lock()
+			.unwrap()
+			.live
+			.as_ref()
+			.unwrap()
+			.broadcast
+			.consume();
+		let _first_reader = broadcast.track("first").unwrap().subscribe(None);
+		let _second_reader = broadcast.track("second").unwrap().subscribe(None);
+		let grant = |pad: &gst::Pad| {
+			pad.property::<Option<gst::Structure>>("track-demand")
+				.expect("active demand")
+				.get::<u64>("grant-bps")
+				.expect("available grant")
+		};
+
+		assert_eq!(grant(&first), 2_000_000);
+		assert_eq!(grant(&second), 2_000_000);
+		assert!(first.send_event(gst::event::Eos::new()));
+		assert!(first.property::<Option<gst::Structure>>("track-demand").is_none());
+		assert_eq!(
+			grant(&second),
+			4_000_000,
+			"the live sibling receives the released share"
+		);
+
+		assert!(first.send_event(gst::event::StreamStart::new("first-resumed")));
+		video_frame(&first);
+		let resumed = first
+			.property::<Option<gst::Structure>>("track-demand")
+			.expect("the resumed track restores demand reporting");
+		assert_eq!(resumed.get::<bool>("wanted"), Ok(false));
+		assert_eq!(
+			resumed.get::<u64>("grant-bps"),
+			Ok(2_000_000),
+			"the retained track reserves again when it resumes"
+		);
+		assert_eq!(
+			grant(&second),
+			4_000_000,
+			"an idle reservation does not tax its live sibling"
+		);
 	}
 
 	// GStreamer keeps CAPS sticky across a flush, so a resumed pad gets no new CAPS event. EOS ended its

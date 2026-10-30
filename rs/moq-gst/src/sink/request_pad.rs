@@ -266,6 +266,34 @@ impl PadLifecycle {
 		changes
 	}
 
+	/// Stop reporting demand and release this pad's share while its retained media producer winds down.
+	pub(super) fn retire_bandwidth(&mut self) -> Option<Notifications> {
+		self.bandwidth.take()?;
+		Some(Notifications {
+			demand: true,
+			..Default::default()
+		})
+	}
+
+	/// Restore demand reporting when an ended pad resumes with its media producer still retained.
+	pub(super) fn restore_bandwidth(
+		&mut self,
+		allocator: moq_net::bandwidth::Allocator,
+		pad: &MoqSinkPad,
+	) -> Option<Notifications> {
+		if self.bandwidth.is_some() {
+			return None;
+		}
+		let demand = self.media.demand()?;
+		let ceiling = self.bandwidth_ceiling();
+		let bandwidth = self.bandwidth.insert(Bandwidth::new(demand, allocator, ceiling));
+		bandwidth.watch(pad.downgrade());
+		Some(Notifications {
+			demand: true,
+			..Default::default()
+		})
+	}
+
 	/// Record a terminal failure. The first reason wins: `error` is terminal for the run, so a later
 	/// failure on an already-failed pad must not rewrite why it stopped. Cleared by [`Self::reset`].
 	pub(super) fn fail(&mut self, reason: String) -> Notifications {
