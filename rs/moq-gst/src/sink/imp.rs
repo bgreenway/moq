@@ -1151,8 +1151,35 @@ impl MoqSink {
 
 	/// Route a terminal reconnect error through the same session gate as finalization messages.
 	pub(super) fn post_session_error(&self, session: &CompletionHandle, error: String) {
+		let updates = {
+			let control = self.control.lock().unwrap();
+			let current = control
+				.live
+				.as_ref()
+				.is_some_and(|state| std::sync::Arc::ptr_eq(&state.session.completion(), session));
+			if !current {
+				Vec::new()
+			} else {
+				self.obj()
+					.sink_pads()
+					.into_iter()
+					.filter_map(|pad| pad.downcast::<MoqSinkPad>().ok())
+					.filter_map(|pad| {
+						let mut lifecycle = pad.lifecycle();
+						let belongs = lifecycle
+							.completion
+							.as_ref()
+							.is_some_and(|completion| std::sync::Arc::ptr_eq(completion, session));
+						(!lifecycle.releasing && belongs).then(|| PadUpdate {
+							pad: pad.clone(),
+							changes: lifecycle.fail(format!("session failed: {error}")),
+						})
+					})
+					.collect()
+			}
+		};
 		self.publish_finished(Finished {
-			updates: Vec::new(),
+			updates,
 			message: Posted::Message {
 				session: session.clone(),
 				kind: MessageKind::SessionError(error),
@@ -1736,6 +1763,61 @@ mod tests {
 		assert_eq!(rebound.get::<u64>("grant-bps"), Ok(4_000_000));
 	}
 
+	#[test]
+	fn terminal_session_failure_retires_active_pad_bandwidth() {
+		let run = CatalogRun::new();
+		let first = run.pad("first");
+		let second = run.pad("second");
+		first.set_property("bandwidth-ceiling", 4_000_000u64);
+		second.set_property("bandwidth-ceiling", 4_000_000u64);
+		let _catalog = run.start();
+
+		let estimate = moq_net::bandwidth::Producer::new();
+		estimate
+			.set(Some(moq_net::bandwidth::Rate::from_bps(4_000_000)))
+			.unwrap();
+		let completion = {
+			let mut control = run.0.imp().control.lock().unwrap();
+			let state = control.live.as_mut().unwrap();
+			state
+				.session
+				.replace_bandwidth(moq_net::bandwidth::Allocator::new(estimate.consume()));
+			state.session.completion()
+		};
+
+		assert!(negotiate(&first, &h264_caps()));
+		assert!(negotiate(&second, &h264_caps()));
+		let broadcast = run
+			.0
+			.imp()
+			.control
+			.lock()
+			.unwrap()
+			.live
+			.as_ref()
+			.unwrap()
+			.broadcast
+			.consume();
+		let _first_reader = broadcast.track("first").unwrap().subscribe(None);
+		let _second_reader = broadcast.track("second").unwrap().subscribe(None);
+		assert!(first.property::<Option<gst::Structure>>("track-demand").is_some());
+		assert!(second.property::<Option<gst::Structure>>("track-demand").is_some());
+
+		assert!(completion.fail());
+		run.0
+			.imp()
+			.post_session_error(&completion, "authentication refused".to_string());
+
+		for pad in [&first, &second] {
+			assert!(pad.property::<Option<gst::Structure>>("track-demand").is_none());
+			assert_eq!(pad.property::<Status>("track-status"), Status::Error);
+			assert_eq!(
+				pad.property::<Option<String>>("track-error").as_deref(),
+				Some("session failed: authentication refused")
+			);
+		}
+	}
+
 	// GStreamer keeps CAPS sticky across a flush, so a resumed pad gets no new CAPS event. EOS ended its
 	// track, so the resumed one takes a fresh name.
 	#[test]
@@ -2224,6 +2306,7 @@ mod tests {
 		let element = sink.clone().upcast::<gst::Element>();
 		let bus = gst::Bus::new();
 		element.set_bus(Some(&bus));
+		let pad = element.request_pad_simple("sink_0").expect("request sink_0");
 		element.set_state(gst::State::Paused).expect("start first session");
 		let first = sink
 			.imp()
@@ -2250,6 +2333,7 @@ mod tests {
 			.expect("replacement session")
 			.session
 			.completion();
+		assert!(negotiate(&pad, &h264_caps()));
 		while bus.pop().is_some() {}
 		sink.imp().post_current(Posted::Message {
 			session: first.clone(),
@@ -2260,6 +2344,11 @@ mod tests {
 		assert!(
 			bus.pop_filtered(&[gst::MessageType::Error]).is_none(),
 			"the stopped session posted an error into its replacement"
+		);
+		assert_eq!(
+			pad.property::<Status>("track-status"),
+			Status::Active,
+			"the stopped session did not fail a replacement pad"
 		);
 
 		sink.imp()
@@ -2275,6 +2364,7 @@ mod tests {
 				.debug()
 				.is_some_and(|debug| debug.contains("current session failed"))
 		);
+		assert_eq!(pad.property::<Status>("track-status"), Status::Error);
 		let _ = element.set_state(gst::State::Null);
 	}
 
