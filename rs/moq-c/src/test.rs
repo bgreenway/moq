@@ -5751,6 +5751,18 @@ fn a_zeroed_config_is_the_defaults() {
 	assert!(parsed.quic.resolve().keylog.is_none());
 }
 
+/// `moq_subscription_defaults` reads back as moq-net's defaults, while a zeroed struct
+/// sets no subscriber limit.
+#[test]
+fn subscription_defaults_are_moq_net_defaults() {
+	let defaults = unsafe { crate::api::parse_subscription(&moq_subscription_defaults()) }.unwrap();
+	assert_eq!(defaults, moq_net::track::Subscription::default());
+
+	let zeroed: moq_subscription = unsafe { std::mem::zeroed() };
+	let zeroed = unsafe { crate::api::parse_subscription(&zeroed) }.unwrap();
+	assert_eq!(zeroed.max_delay, None);
+}
+
 /// `moq_client_defaults` has to agree with what a zeroed struct actually dials,
 /// or a settings UI shows numbers the library won't use. Pinned against the
 /// config each value comes from, so retuning a default without following through

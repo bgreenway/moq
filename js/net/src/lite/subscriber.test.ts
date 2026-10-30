@@ -2356,7 +2356,10 @@ test.each([
 	const { quic, streams, opened, closes } = fakeSession();
 	const subscriber = new Subscriber(quic, version, HopSchema.parse(1n));
 	const broadcast = subscriber.consume(Path.from("room"));
-	const track = broadcast.track("video").subscribe({ groups: { start: { included: 0 }, end: { excluded: 1 } } });
+	const track = broadcast.track("video").subscribe({
+		maxDelay: Milli.zero,
+		groups: { start: { included: 0 }, end: { excluded: 1 } },
+	});
 	try {
 		await opened(0);
 		await answerTrackInfo(streams[0], version);
@@ -2370,7 +2373,7 @@ test.each([
 					}),
 				)
 			: undefined;
-		track.update({ groups });
+		track.update({ maxDelay: Milli.zero, groups });
 		await refused;
 		await drainReactions();
 

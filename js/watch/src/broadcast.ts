@@ -2,7 +2,7 @@ import * as Catalog from "@moq/hang/catalog";
 import * as Json from "@moq/json";
 import * as Msf from "@moq/msf";
 import type * as Moq from "@moq/net";
-import { Error as NetError, Path, StreamCode } from "@moq/net";
+import { Error as NetError, Path, StreamCode, Track } from "@moq/net";
 import {
 	Effect,
 	type Getter,
@@ -355,7 +355,10 @@ export class Broadcast {
 		this.#out.status.set("loading");
 
 		const trackName = format === "hang" ? Catalog.TRACK : "catalog";
-		const track = broadcast.track(trackName).subscribe({ priority: Catalog.PRIORITY.catalog });
+		const track = broadcast.track(trackName).subscribe({
+			...Track.Subscription.default(),
+			priority: Catalog.PRIORITY.catalog,
+		});
 		effect.cleanup(() => track.close());
 
 		// The hang catalog is reconstructed from snapshots (and future deltas) via @moq/json, which reads

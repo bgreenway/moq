@@ -646,7 +646,9 @@ pub enum moq_demand {
 /// Subscriber-side raw track delivery preferences.
 ///
 /// A null [moq_consume_track] or [moq_consume_track_update] `subscription`
-/// pointer uses the moq-net defaults, and so does a zeroed struct.
+/// pointer uses the moq-net defaults, which [moq_subscription_defaults] returns as a
+/// struct to change. A zeroed struct differs only in `max_delay_present`: it sets no
+/// subscriber limit.
 #[repr(C)]
 pub struct moq_subscription {
 	/// Delivery priority. Higher values preempt lower ones under contention; the default 0 is
@@ -657,7 +659,8 @@ pub struct moq_subscription {
 	/// Zero skips immediately. Enforced by the publisher's cache and by any local buffering.
 	/// It caps every range.
 	pub max_delay_us: u64,
-	/// Whether `max_delay_us` is set. When false, moq-net's default applies: zero.
+	/// Whether `max_delay_us` is set. When false, there is no subscriber limit, leaving the
+	/// publisher's max age alone to bound it.
 	pub max_delay_present: bool,
 
 	/// The spans of the track to deliver, or NULL for everything `max_delay_us` still
@@ -749,9 +752,8 @@ pub(crate) unsafe fn parse_subscription(
 	let mut out = moq_net::track::Subscription::default()
 		.with_priority(subscription.priority)
 		.with_order(order);
-	if subscription.max_delay_present {
-		out = out.with_max_delay(std::time::Duration::from_micros(subscription.max_delay_us));
-	}
+	let max_delay = std::time::Duration::from_micros(subscription.max_delay_us);
+	out = out.with_max_delay(subscription.max_delay_present.then_some(max_delay));
 	if !subscription.ranges.is_null() {
 		let ranges = unsafe { std::slice::from_raw_parts(subscription.ranges, subscription.ranges_len) };
 		let ranges = ranges
@@ -1199,6 +1201,28 @@ pub unsafe extern "C" fn moq_mint_epoch(dst: *mut c_char, dst_len: usize) -> i32
 #[unsafe(no_mangle)]
 pub extern "C" fn moq_qlog_supported() -> bool {
 	moq_tokio::qlog_supported()
+}
+
+/// A [moq_subscription] with moq-net's defaults, whose zero `max_delay_us` skips a
+/// superseded group at once. A NULL subscription pointer means the same; start from
+/// this struct to change a field.
+///
+/// Returned by value because there is nothing to fail.
+#[unsafe(no_mangle)]
+pub extern "C" fn moq_subscription_defaults() -> moq_subscription {
+	let defaults = moq_net::track::Subscription::default();
+	let order = match defaults.order {
+		moq_net::track::Order::Descending => moq_order::MOQ_ORDER_DESCENDING,
+		moq_net::track::Order::Ascending => moq_order::MOQ_ORDER_ASCENDING,
+	};
+	moq_subscription {
+		priority: defaults.priority,
+		max_delay_us: defaults.max_delay.map(micros).unwrap_or_default(),
+		max_delay_present: defaults.max_delay.is_some(),
+		ranges: std::ptr::null(),
+		ranges_len: 0,
+		order: order as u32,
+	}
 }
 
 /// A duration as microseconds, saturating rather than wrapping.

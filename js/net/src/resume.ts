@@ -463,7 +463,7 @@ class Reader implements ResumeSource {
 
 	/** What `copy` is asked for: the reader's own preferences, from its floor and through its replacement. */
 	#wire(copy: Pick<Copy, "floor" | "until">): track.Subscription {
-		const preferences = this.#shell.subscription.peek() ?? {};
+		const preferences = this.#shell.subscription.peek() ?? track.Subscription.default();
 		const bounds = groupBounds(preferences.groups);
 		const start = Math.max(bounds.start, copy.floor ?? 0);
 		const replaced = copyEnd(copy);

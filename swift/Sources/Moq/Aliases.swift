@@ -126,4 +126,9 @@ extension Subscription {
     public typealias Anchor = MoqFFI.MoqAnchor
     /// Which pending group the publisher sends first: `.ascending` or `.descending`.
     public typealias Order = MoqFFI.MoqOrder
+
+    /// moq-net's defaults, whose `maxDelay` of 0 skips a superseded group at once. A `nil`
+    /// subscription means the same; copy this one to change a field. A `Subscription()`
+    /// leaves `maxDelay` `nil`, which sets no subscriber limit.
+    public static var `default`: Subscription { moqSubscriptionDefaults() }
 }
