@@ -227,28 +227,12 @@ impl State {
 			if let Some(producer) = track.producer {
 				let _ = producer.abort(err.clone());
 			}
-			if let Fill::Ready { producer, .. } = &*track.fill.read() {
-				let _ = producer.handle().abort(err.clone());
+			if let Ok(mut fill) = track.fill.write() {
+				fill.abort(err.clone());
 			}
 		}
 		for (_, producer) in self.lingering.drain() {
 			let _ = producer.abort(err.clone());
-		}
-	}
-	fn close(&mut self) {
-		for (_, mut track) in self.subscribes.drain() {
-			if let Some(request) = track.pending.take() {
-				request.reject(Error::Cancel);
-			}
-			if let Some(producer) = track.producer {
-				let _ = producer.abort(Error::Stream(crate::StreamError::Session(SessionError::Cancel)));
-			}
-			if let Ok(mut fill) = track.fill.write() {
-				fill.cancel();
-			}
-		}
-		for (_, producer) in self.lingering.drain() {
-			let _ = producer.abort(Error::Stream(crate::StreamError::Session(SessionError::Cancel)));
 		}
 	}
 }
@@ -387,9 +371,14 @@ impl Fill {
 	/// rejoin could not replace the cached group, and its readers would see it end early.
 	/// A clean end already settled the head, so [`Fill::Ended`] stays.
 	fn cancel(&mut self) {
+		self.abort(Error::Cancel);
+	}
+
+	/// [`Self::cancel`], with `err` as the reason the head was cut short.
+	fn abort(&mut self, err: Error) {
 		match std::mem::replace(self, Fill::Done) {
 			Fill::Ready { producer, .. } => {
-				let _ = producer.abort(Error::Cancel);
+				let _ = producer.abort(err);
 			}
 			Fill::Ended => *self = Fill::Ended,
 			_ => {}
@@ -1166,10 +1155,6 @@ impl Subscriber {
 	/// End every active subscription with the error that ended the session.
 	pub fn abort(&self, err: &Error) {
 		self.state.lock().abort(err);
-	}
-
-	pub fn close(&self) {
-		self.state.lock().close();
 	}
 
 	/// Settle waits for control state that cannot arrive on the closed transport,
@@ -13982,13 +13967,10 @@ mod stitch_tests {
 		let mut fill = h.stream().await;
 		h.subscriber.clone().recv_fill(&mut fill).await.expect("fill");
 		let mut group = consumer.recv_group().await.unwrap().unwrap();
-		h.subscriber.close();
+		h.subscriber.abort(&Error::Session(SessionError::Cancel));
 		let result = group.read_frame().await;
 		assert!(
-			matches!(
-				result,
-				Err(Error::Stream(crate::StreamError::Session(SessionError::Cancel)))
-			),
+			matches!(result, Err(Error::Session(SessionError::Cancel))),
 			"{result:?}"
 		);
 		assert!(

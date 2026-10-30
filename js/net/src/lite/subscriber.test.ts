@@ -11,6 +11,7 @@ import {
 	ProtocolViolation,
 	reason,
 	SessionCode,
+	SessionError,
 	StreamCode,
 	StreamError,
 	TimestampMismatch,
@@ -1038,8 +1039,9 @@ function expectCut(err: unknown, cause: Error | undefined) {
 	if (cause) {
 		expect(err).toBe(cause);
 	} else {
-		expect(err).toBeInstanceOf(StreamError);
-		expect((err as StreamError).code).toBe(StreamCode.SessionClosed);
+		// A deliberate close cuts it off as the peer's clean close would.
+		expect(err).toBeInstanceOf(SessionError);
+		expect((err as SessionError).code).toBe(SessionCode.Cancel);
 	}
 }
 

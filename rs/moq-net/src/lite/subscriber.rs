@@ -548,24 +548,14 @@ impl SubscriptionCleanup {
 	/// End every active subscription with the session's error. Group machines own
 	/// their cleanup independently; this records the track's terminal state.
 	///
-	/// A subscription the publisher already ended finishes instead, here and on
-	/// [`Self::close`]: its track is over, and what arrived stays servable to readers
-	/// still behind rather than handed to another route.
+	/// A subscription the publisher already ended finishes instead: its track is over,
+	/// and what arrived stays servable to readers still behind rather than handed to
+	/// another route.
 	fn abort(&self, err: &Error) {
 		for (_, entry) in self.0.lock().drain() {
 			let _ = match entry.tail.read().is_ended() {
 				true => entry.producer.finish(),
 				false => entry.producer.abort(err.clone()),
-			};
-		}
-	}
-	fn close(&self) {
-		for (_, entry) in self.0.lock().drain() {
-			let _ = match entry.tail.read().is_ended() {
-				true => entry.producer.finish(),
-				false => entry
-					.producer
-					.abort(Error::Stream(crate::StreamError::Session(crate::SessionError::Cancel))),
 			};
 		}
 	}
@@ -624,11 +614,6 @@ impl SubscriberDriver {
 		// rejects with `err` rather than `Dropped`.
 		self.subscriber.note_end(err);
 		self.cleanup.abort(err);
-	}
-
-	pub fn close(&self) {
-		self.subscriber.note_end(&Error::Cancel);
-		self.cleanup.close();
 	}
 
 	/// Read what the closed transport already delivered: the buffered uni streams, then

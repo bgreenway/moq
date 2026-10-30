@@ -419,11 +419,12 @@ pub fn start(config: Config) -> Result<(Driver, crate::goaway::Handle, Option<cr
 				Ok(()) => Error::Cancel,
 				Err(err) => err.clone(),
 			});
-			if !closing.is_local() {
-				kio::wait(|waiter| unis.poll_drain(waiter)).await;
-			}
+			// Whichever side closed it, read what already arrived.
+			kio::wait(|waiter| unis.poll_drain(waiter)).await;
+			// Closed cleanly by dropping or draining: readers see what the peer's clean
+			// close would have shown them.
 			if closing.is_local() {
-				subscriber.close();
+				subscriber.abort(&Error::Session(SessionError::Cancel));
 			} else if let Err(err) = &res {
 				// Every track this session was receiving ends with its error.
 				subscriber.abort(err);

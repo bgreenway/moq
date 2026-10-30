@@ -5061,8 +5061,7 @@ impl Consumer {
 	/// Poll for the track reaching a terminal state: `Ok(())` once it is complete
 	/// (the final group was produced), `Err` once it closed or aborted before
 	/// completing. This tells a track that truly ended from one whose serving route
-	/// died mid-stream. A session closed locally, on purpose, aborts its tracks with
-	/// [`StreamError::Session`] carrying [`crate::SessionError::Cancel`].
+	/// died mid-stream.
 	pub(super) fn poll_complete(&self, waiter: &kio::Waiter) -> Poll<Result<()>> {
 		self.with_state(|state| {
 			let Some(state) = state else {

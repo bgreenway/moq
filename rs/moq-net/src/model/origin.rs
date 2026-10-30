@@ -18,7 +18,7 @@ use super::{
 	front::{Action, Candidate, Event, Front, Refusal},
 };
 use crate::{
-	Epoch, Error, InvalidPattern, Path, Pattern, Patterns, SessionError, StreamError,
+	Epoch, Error, InvalidPattern, Path, Pattern, Patterns,
 	coding::{BoundsExceeded, Decode, DecodeError, Decoder, Encode, EncodeError, Encoder, Form, varint},
 	path::{self, Segment},
 	time::{Deadlines, Instant},
@@ -3138,9 +3138,6 @@ struct TrackIo {
 	/// subscription that query made.
 	copy: Option<(u64, track::Consumer, track::Resolving)>,
 	held: Option<kio::Pending<track::Subscribing>>,
-	/// The last copy ended because its session closed locally: a close, not an
-	/// error, so the track ends cleanly if nothing takes over.
-	closed: bool,
 	/// Whether the track had a reader as of the last demand edge.
 	used: bool,
 }
@@ -3760,13 +3757,9 @@ async fn serve_front(task: FrontTask) -> Vec<InFlight> {
 							{
 								io.splice(asked);
 							}
-							// Nothing in flight: unread, or nothing serving it. One whose copy
-							// went with a session closed locally ends cleanly.
+							// Nothing in flight: unread, or nothing serving it.
 							if !used || io.copy.is_none() {
-								io.end(match io.closed && used {
-									true => Ok(()),
-									false => Err(err.clone()),
-								});
+								io.end(Err(err.clone()));
 								// An unread track the front has not parked yet still holds
 								// its copy, which would keep its source subscribed.
 								if !used {
@@ -3933,7 +3926,6 @@ async fn serve_front(task: FrontTask) -> Vec<InFlight> {
 						staged: None,
 						copy: None,
 						held: None,
-						closed: false,
 						used: false,
 					},
 				);
@@ -4028,7 +4020,6 @@ async fn serve_front(task: FrontTask) -> Vec<InFlight> {
 				let Some(io) = tracks.get_mut(&name) else { continue };
 				io.copy = None;
 				io.held = None;
-				io.closed = matches!(result, Err(Error::Stream(StreamError::Session(SessionError::Cancel))));
 				Event::TrackEnded {
 					track: name,
 					source,
@@ -7445,7 +7436,6 @@ mod tests {
 				staged: None,
 				copy: None,
 				held: None,
-				closed: false,
 				used: true,
 			};
 			let mut subscriber = consumer.subscribe(None).now_or_never().unwrap().unwrap();

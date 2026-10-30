@@ -153,7 +153,6 @@ function sees(filter: Filter, path: Path.Valid): boolean {
  */
 export class Subscriber {
 	#session: Session;
-	#localClose = false;
 
 	// The transport, so a request cut off by the session's close ends with the session's
 	// error. Optional for tests that drive a bare session.
@@ -217,11 +216,6 @@ export class Subscriber {
 	// the peer answers, which allows everything.
 	#grant?: Getter<Grant | undefined>;
 	#auth?: AuthSession;
-
-	/** Marks this subscriber's deliberate local session close. @internal */
-	close() {
-		this.#localClose = true;
-	}
 
 	/**
 	 * Creates a new Subscriber instance.
@@ -979,8 +973,7 @@ export class Subscriber {
 		} catch (err) {
 			stream.abort(err);
 			const e = await sessionCause(this.#quic, err);
-			if (this.#localClose) hooks.releaseTrack(producer);
-			else producer.abort(e);
+			producer.abort(e);
 			console.warn(
 				`subscribe error: id=${requestId} broadcast=${broadcast} track=${request.name} error=${reason(e)}`,
 			);

@@ -438,22 +438,20 @@ impl Driver {
 					self.session.abort(&Error::Cancel, SessionError::Cancel.to_code(), "");
 				}
 			}
-			if self.session.closing().is_local() {
-				self.subscriber.close();
-				return Poll::Ready(res);
-			}
 			self.ending = Some(res);
 		}
 		// Closing the transport first bounds every read, including when a control
 		// stream ended the protocol while the connection itself was still live.
-		// Keep control machines and their subscription entries until data drains.
+		// Keep control machines and their subscription entries until data drains,
+		// whichever side closed it.
 		std::task::ready!(self.subscriber.poll_drain(waiter));
 		let res = self.ending.take().expect("draining a terminal session");
-		if let Err(err) = &res {
-			self.subscriber.abort(err);
-		} else {
-			self.subscriber.close();
-		}
+		// A clean close, by dropping or draining here or by the peer, cuts off what is
+		// still arriving with the cancelled session either way.
+		self.subscriber.abort(match &res {
+			Err(err) if !self.session.closing().is_local() => err,
+			_ => &Error::Session(SessionError::Cancel),
+		});
 		Poll::Ready(res)
 	}
 

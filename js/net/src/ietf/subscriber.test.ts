@@ -651,7 +651,6 @@ test("a consumed broadcast refuses to list its tracks rather than claim it has n
 	// A later reader asks again, and is refused again.
 	await expect(consumer.tracks().next()).rejects.toThrow("track listing requires moq-lite-07");
 	consumer.close();
-	subscriber.close();
 });
 
 /**

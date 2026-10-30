@@ -1686,7 +1686,7 @@ export class Producer {
 	}
 
 	// `abort` is undefined for a clean close, which keeps whatever end was declared. A received
-	// copy whose session closed locally closes cleanly without one: a dead route, not finished
+	// copy released because nobody wants it closes cleanly without one: a dead route, not finished
 	// content.
 	#close(abort: Error | undefined) {
 		if (this.#state.closed.peek() !== undefined) return;
