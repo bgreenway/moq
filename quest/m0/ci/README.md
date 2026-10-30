@@ -135,7 +135,6 @@ The historical samples locate candidates; they are not controlled benchmarks.
 - [Unify dependency features](/quest/m0/ci/hakari.md) - a cargo-hakari workspace-hack so every job compiles each dependency alike and mbx hits across jobs
 - [Fewer BTreeMap instantiations](/quest/m0/ci/btree-keys.md) - moq-net shares BTreeMap key and value types, kept only if its CPU time drops
 - [Halve the slowest tests' CPU](/quest/m0/ci/slow-tests.md) - the slowest 1% of tests take under half their 289 CPU-seconds, with coverage kept
-- [tracing-test filter](/quest/m0/ci/tracing-filter.md) - moq-tokio's tests stop forcing every crate to format at TRACE
 - [Stats oversize](/quest/m0/ci/stats-oversize.md) - moq-stats refuses an oversized plain snapshot before parsing it back
 - [Gate send-depth](/quest/m0/ci/send-depth-gate.md) - the merge gate runs send-depth on a pinned nightly when moq-net changes, after #6890 fixes main
 - [Cargo aliases in nested checkouts](/quest/m0/ci/cargo-alias-strings.md) - `cargo build-ffi` and `cargo moq` work from a worktree nested inside another checkout
