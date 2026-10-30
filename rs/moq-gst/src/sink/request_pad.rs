@@ -349,7 +349,7 @@ impl ObjectImpl for MoqSinkPadImp {
 						"Maximum bitrate in bits per second for the encoder feeding this track. A \
 						 nonzero value reserves a fair share of the connection estimate and exposes \
 						 it through track-demand; zero observes demand without taking a reservation. \
-						 Writable before and while the pad is active; changes retune the live reservation",
+						 Writable at any time; changes retune a live reservation or configure the next run",
 					)
 					.default_value(0)
 					.mutable_playing()
@@ -396,9 +396,7 @@ impl ObjectImpl for MoqSinkPadImp {
 			);
 			return;
 		}
-		if pspec.name() == "bandwidth-ceiling"
-			&& (lifecycle.settings.effective.is_none() || lifecycle.bandwidth.is_some())
-		{
+		if pspec.name() == "bandwidth-ceiling" {
 			let ceiling = value.get().unwrap();
 			lifecycle.settings.bandwidth_ceiling = ceiling;
 			let demand = lifecycle
@@ -682,6 +680,9 @@ mod tests {
 		apply(&ended, PadLifecycle::end);
 		assert!(ended.property::<Option<gst::Structure>>("track-demand").is_none());
 		assert_eq!(ended_grant.peek(), None);
+		ended.set_property("bandwidth-ceiling", 2_000_000u64);
+		apply(&ended, PadLifecycle::reset);
+		assert_eq!(ended.property::<u64>("bandwidth-ceiling"), 2_000_000);
 
 		let failed = sink_pad();
 		let track = broadcast
