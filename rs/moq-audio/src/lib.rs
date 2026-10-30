@@ -37,9 +37,9 @@
 //!   meter, into one program feed that the caller reads on its own clock: a
 //!   studio's program audio. Behind the default-on `bus` feature.
 //! - `aec` keeps the speaker out of the microphone, which is what a conference
-//!   on a laptop needs to not send itself back. `aec::Processor` processes PCM
-//!   supplied by any audio stack behind the `aec-processor` feature. The `aec`
-//!   feature additionally wires `playback::Engine::canceller` to
+//!   on a laptop needs to not send itself back. [`aec::Processor`] processes PCM
+//!   supplied by any audio stack without enabling device features. The `aec`
+//!   feature wires `playback::Engine::canceller` to
 //!   `capture::Config::aec` and implies both device features.
 //!
 //! [`Format`] mirrors WebCodecs `AudioData.format`; the helpers convert between
@@ -68,7 +68,6 @@ mod resample;
 #[cfg(any(feature = "bus", feature = "playback"))]
 mod ring;
 
-#[cfg(any(feature = "aec", feature = "aec-processor"))]
 pub mod aec;
 #[cfg(feature = "bus")]
 pub mod bus;

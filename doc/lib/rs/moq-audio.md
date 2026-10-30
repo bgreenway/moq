@@ -42,8 +42,8 @@ host with no usable capture timestamp.
 
 ```bash
 cargo add moq-audio --features playback
-cargo add moq-audio --features capture,playback,aec    # Linux: cpal links libasound
-cargo add moq-audio --features aec-processor           # PCM only; no platform audio library
+cargo add moq-audio --features aec    # Built-in devices; Linux: cpal links libasound
+cargo add moq-audio                   # PCM echo processing needs no device feature
 cargo add moq-audio --features capture,pipewire
 ```
 
