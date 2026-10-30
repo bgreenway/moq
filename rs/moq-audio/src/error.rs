@@ -36,18 +36,22 @@ pub enum Error {
 	#[error("audio resource already in use: {0}")]
 	Busy(String),
 
+	/// The acoustic echo processor rejected otherwise supported PCM.
+	#[error("audio processing: {0}")]
+	Processing(String),
+
 	/// A packet could not be decoded: truncated, corrupt, or using a codec
 	/// feature this build doesn't implement. The stream itself may be fine, so a
 	/// consumer can log this one and read the next packet.
 	#[error("audio decode: {0}")]
 	Decode(String),
 
-	/// The input buffer was not aligned to the codec's frame size.
-	#[error("input buffer length {got} bytes does not match expected {expected}")]
+	/// The input buffer was not aligned to its sample or frame size.
+	#[error("input buffer length {got} does not match expected {expected}")]
 	Misaligned {
-		/// The buffer length received, in bytes.
+		/// The buffer length received, in the API's input units.
 		got: usize,
-		/// The buffer length required, in bytes.
+		/// The next aligned length, in the API's input units.
 		expected: usize,
 	},
 

@@ -17,7 +17,8 @@ categories = ["multimedia", "multimedia::audio", "multimedia::encoding"]
 # and `bus` (pure Rust). Off by default: the device features, because on Linux cpal links
 # libasound at build time, the one system build dependency in this crate. macOS
 # and Windows would pay nothing, but a default is one setting for every host.
-# The features exist so a consumer can pick what it wants, not to hide code from
+# `aec-processor` is device-independent and does not link libasound. The
+# features exist so a consumer can pick what it wants, not to hide code from
 # the default compile: `just check` lints default features only, so the device
 # code is compiled by nightly's `just rs features` and platform.yml's
 # `just rs macos`. Workspace consumers opt in at the root manifest
@@ -63,10 +64,13 @@ playback = ["dep:cpal", "dep:kio", "dep:ringbuf", "dep:tokio", "dep:tracing"]
 # `capture` or `playback` activates it, so a host flag alone pulls no audio I/O.
 pipewire = ["cpal?/pipewire"]
 pulseaudio = ["cpal?/pulseaudio"]
-# Acoustic echo cancellation: subtract what `playback` is playing from what
-# `capture` hears, so a speakerphone doesn't send its own output back. Needs
-# both halves, since the canceller taps the output mix as its reference.
-aec = ["capture", "dep:sonora", "playback"]
+# Device-independent acoustic echo cancellation over caller-supplied PCM.
+# This does not pull cpal or a platform audio library.
+aec-processor = ["dep:sonora"]
+# Acoustic echo cancellation wired directly between `playback` and `capture`,
+# so a speakerphone doesn't send its own output back. Retains the original
+# feature contract while sharing the processor above.
+aec = ["aec-processor", "capture", "playback"]
 
 [dependencies]
 bytes = { workspace = true }
