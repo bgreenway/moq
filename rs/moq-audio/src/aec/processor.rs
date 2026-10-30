@@ -152,14 +152,14 @@ impl Processor {
 			render_pending.extend_from_slice(&remaining[..take]);
 			remaining = &remaining[take..];
 			if render_pending.len() == stride {
-				process_frame(inner, &config, render_pending, render_in, render_out, true)?;
+				process_frame(inner, &config, render_pending, render_in, render_out, true);
 				render_pending.clear();
 			}
 		}
 
 		let mut frames = remaining.chunks_exact(stride);
 		for frame in &mut frames {
-			process_frame(inner, &config, frame, render_in, render_out, true)?;
+			process_frame(inner, &config, frame, render_in, render_out, true);
 		}
 		render_pending.extend_from_slice(frames.remainder());
 		Ok(())
@@ -188,7 +188,7 @@ impl Processor {
 		let complete = capture_pending.len() / stride * stride;
 
 		for frame in capture_pending[..complete].chunks_exact(stride) {
-			process_frame(inner, &config, frame, capture_in, capture_out, false)?;
+			process_frame(inner, &config, frame, capture_in, capture_out, false);
 			interleave(capture_out, config.num_channels() as usize, capture_processed);
 		}
 		capture_pending.drain(..complete);
@@ -210,7 +210,7 @@ impl Processor {
 
 		self.inner
 			.set_stream_delay_ms(delay.as_millis() as i32)
-			.map_err(processing_error)?;
+			.expect("the delay is within the supported range");
 		self.stream_delay = delay;
 		Ok(())
 	}
@@ -303,7 +303,7 @@ fn process_frame(
 	planar_in: &mut [f32],
 	planar_out: &mut [f32],
 	render: bool,
-) -> Result<(), Error> {
+) {
 	let channels = config.num_channels() as usize;
 	deinterleave(input, planar_in, channels);
 	let result = match channels {
@@ -320,11 +320,7 @@ fn process_frame(
 			}
 		}
 	};
-	result.map_err(processing_error)
-}
-
-fn processing_error(error: sonora::Error) -> Error {
-	Error::Processing(error.to_string())
+	result.expect("stream formats were validated at construction");
 }
 
 fn duration(milliseconds: Option<i32>) -> Option<Duration> {

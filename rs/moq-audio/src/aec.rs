@@ -429,25 +429,30 @@ impl State {
 			reference.start();
 			while reference.available() >= REFERENCE_FRAME {
 				reference.read(reference_frame);
-				let _ = processor.process_render(reference_frame);
+				// Preserve the reference timeline even when the mix contains an
+				// invalid sample, just as the microphone path does below.
+				for sample in &mut *reference_frame {
+					if !sample.is_finite() {
+						*sample = 0.0;
+					}
+				}
+				processor
+					.process_render(reference_frame)
+					.expect("the reference contains whole frames of finite PCM");
 			}
 		}
 
-		// A device callback is trusted to provide the configured shape, but some
-		// drivers can still surface a non-finite sample. Keep the device timeline
-		// continuous without weakening Processor's validation for external input.
+		// Replace individual invalid samples rather than drop a callback and
+		// shift the microphone timeline against the echo reference.
 		for sample in &mut *buf {
 			if !sample.is_finite() {
 				*sample = 0.0;
 			}
 		}
 
-		// The device format was validated at attachment, so processing errors
-		// indicate a discontinuity. Leave this callback untouched and restart on
-		// the next one rather than publish a partial result.
-		if processor.process_capture(buf).is_err() {
-			processor.clear_buffers();
-		}
+		processor
+			.process_capture(buf)
+			.expect("the device supplies channel-aligned finite PCM");
 	}
 }
 
@@ -630,10 +635,12 @@ mod tests {
 	#[test]
 	fn device_path_sanitizes_non_finite_samples_without_resetting() {
 		let canceller = opened(48_000, 1);
+		let mut prod = tap(&canceller);
 		let frame = frame(48_000);
 
 		let mut first = vec![0.5f32; frame + 32];
 		canceller.process(&mut first);
+		play(&mut prod, f32::NAN);
 		let mut invalid = vec![f32::NAN; frame - 32];
 		canceller.process(&mut invalid);
 

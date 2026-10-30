@@ -36,10 +36,6 @@ pub enum Error {
 	#[error("audio resource already in use: {0}")]
 	Busy(String),
 
-	/// The acoustic echo processor rejected otherwise supported PCM.
-	#[error("audio processing: {0}")]
-	Processing(String),
-
 	/// A packet could not be decoded: truncated, corrupt, or using a codec
 	/// feature this build doesn't implement. The stream itself may be fine, so a
 	/// consumer can log this one and read the next packet.
