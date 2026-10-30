@@ -220,6 +220,11 @@ impl Processor {
 		self.stream_delay
 	}
 
+	#[cfg(feature = "aec")]
+	pub(super) fn capture(&self) -> Stream {
+		self.capture
+	}
+
 	/// Return the latest echo-cancellation measurements.
 	pub fn statistics(&self) -> Stats {
 		Stats::from_sonora(self.inner.statistics())
@@ -242,12 +247,12 @@ impl Processor {
 		self.capture_processed.clear();
 	}
 
-	#[cfg(test)]
+	#[cfg(all(test, feature = "aec"))]
 	pub(super) fn pending_samples(&self) -> usize {
 		self.capture_pending.len()
 	}
 
-	#[cfg(test)]
+	#[cfg(all(test, feature = "aec"))]
 	pub(super) fn processed_samples(&self) -> usize {
 		self.capture_processed.len()
 	}

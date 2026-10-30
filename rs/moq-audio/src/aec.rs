@@ -197,23 +197,10 @@ impl Control {
 	/// back: the adaptive filter survives that as long as the format hasn't
 	/// changed, since it is still the same room.
 	pub(crate) fn attach(&self, sample_rate: u32, channels: u32) -> Result<Attachment, Error> {
-		// sonora reports a bad format per call, by which point we are on the
-		// audio thread and can only log it. Reject it while there is still a
-		// caller to hand an error to.
-		if !(8_000..=384_000).contains(&sample_rate) {
-			return Err(Error::Unsupported(format!(
-				"echo cancellation needs a microphone between 8 and 384 kHz (got {sample_rate})"
-			)));
-		}
-		if channels == 0 || channels > REFERENCE_CHANNELS as u32 {
-			return Err(Error::Unsupported(format!(
-				"echo cancellation accepts a mono or stereo microphone (got {channels} channels)"
-			)));
-		}
-
 		let capture = Stream::new(sample_rate, crate::Layout::from_channels(channels)?);
 		// Built outside the lock: this allocates, and the microphone callback
-		// takes the same lock.
+		// takes the same lock. Processor construction also rejects unsupported
+		// formats while there is still a caller to hand an error to.
 		let processor = Processor::new(
 			self.inner.config.clone(),
 			Stream::new(REFERENCE_RATE, crate::Layout::Stereo),
@@ -230,9 +217,12 @@ impl Control {
 		}
 
 		let mut state = self.inner.state.lock().unwrap();
-		if state.processor.is_none() || state.capture != Some(capture) {
+		let same_capture = state
+			.processor
+			.as_ref()
+			.is_some_and(|processor| processor.capture() == capture);
+		if !same_capture {
 			state.processor = Some(processor);
-			state.capture = Some(capture);
 		} else {
 			state.reset();
 		}
@@ -358,7 +348,6 @@ impl Drop for Inner {
 struct State {
 	/// `None` until a microphone opens and reports its format.
 	processor: Option<Processor>,
-	capture: Option<Stream>,
 	/// Reference from the output mixer, replaced whenever the output stream is
 	/// rebuilt and `None` while none is running.
 	reference: Option<ring::Consumer>,
@@ -375,7 +364,6 @@ impl Default for State {
 	fn default() -> Self {
 		Self {
 			processor: None,
-			capture: None,
 			reference: None,
 			running: false,
 			reference_frame: vec![0.0; REFERENCE_FRAME * REFERENCE_CHANNELS],
@@ -442,6 +430,15 @@ impl State {
 			while reference.available() >= REFERENCE_FRAME {
 				reference.read(reference_frame);
 				let _ = processor.process_render(reference_frame);
+			}
+		}
+
+		// A device callback is trusted to provide the configured shape, but some
+		// drivers can still surface a non-finite sample. Keep the device timeline
+		// continuous without weakening Processor's validation for external input.
+		for sample in &mut *buf {
+			if !sample.is_finite() {
+				*sample = 0.0;
 			}
 		}
 
@@ -628,6 +625,32 @@ mod tests {
 		let mut second = vec![0.5f32; frame * 3 / 2];
 		canceller.process(&mut second);
 		assert_ne!(second.last(), Some(&0.0), "the leftover was never made up");
+	}
+
+	#[test]
+	fn device_path_sanitizes_non_finite_samples_without_resetting() {
+		let canceller = opened(48_000, 1);
+		let frame = frame(48_000);
+
+		let mut first = vec![0.5f32; frame + 32];
+		canceller.process(&mut first);
+		let mut invalid = vec![f32::NAN; frame - 32];
+		canceller.process(&mut invalid);
+
+		assert!(invalid.iter().all(|sample| sample.is_finite()));
+		assert_eq!(
+			canceller
+				.inner
+				.state
+				.lock()
+				.unwrap()
+				.processor
+				.as_ref()
+				.unwrap()
+				.pending_samples(),
+			0,
+			"the invalid callback reset a partial frame instead of completing it"
+		);
 	}
 
 	/// Callback sizes that don't divide evenly into 10 ms must not lose samples:
