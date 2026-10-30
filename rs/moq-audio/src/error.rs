@@ -45,9 +45,9 @@ pub enum Error {
 	/// The input buffer was not aligned to its sample or frame size.
 	#[error("input buffer length {got} does not match expected {expected}")]
 	Misaligned {
-		/// The buffer length received, in the API's input units.
+		/// The buffer length received, in the units the error's origin documents.
 		got: usize,
-		/// The next aligned length, in the API's input units.
+		/// The buffer length the call accepts, in the units the error's origin documents.
 		expected: usize,
 	},
 
