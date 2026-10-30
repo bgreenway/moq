@@ -53,6 +53,7 @@ struct Settings {
 /// Subscriber demand and an optional share of the connection's send estimate for one live track.
 struct Bandwidth {
 	demand: moq_net::track::Demand,
+	allocator: moq_net::bandwidth::Allocator,
 	/// Keeps the claim alive; the separate consumer can be cloned into the watcher.
 	reservation: Option<moq_net::bandwidth::Reservation>,
 	grant: Option<moq_net::bandwidth::Consumer>,
@@ -91,6 +92,7 @@ impl Bandwidth {
 		let grant = reservation.as_ref().map(moq_net::bandwidth::Reservation::consume);
 		Self {
 			demand,
+			allocator,
 			reservation,
 			grant,
 			watch_task: None,
@@ -100,41 +102,65 @@ impl Bandwidth {
 	/// Start notifications after this value is installed in the lifecycle. Property getters read the
 	/// handles directly, so the tasks carry no mirrored state that could go stale.
 	fn watch(&mut self, pad: glib::WeakRef<MoqSinkPad>) {
+		self.stop_watch();
 		let mut demand = self.demand.clone();
+		let mut grant = self.grant.clone();
 		// Activation emits the initial notification synchronously. Prime this clone so the task only
 		// reports subsequent changes instead of immediately duplicating that notification.
 		let _ = demand.poll_wanted_changed(&moq_net::kio::Waiter::noop());
-		self.watch_task = Some(if let Some(mut grant) = self.grant.clone() {
+		if let Some(grant) = &mut grant {
 			let _ = grant.poll_changed(&moq_net::kio::Waiter::noop());
-			RUNTIME.spawn(async move {
-				loop {
-					tokio::select! {
-						result = demand.wanted_changed() => {
-							notify_demand(&pad);
-							if result.is_err() {
-								return;
-							}
+		}
+		self.watch_task = Some(RUNTIME.spawn(async move {
+			loop {
+				tokio::select! {
+					result = demand.wanted_changed() => {
+						notify_demand(&pad);
+						if result.is_err() {
+							return;
 						}
-						result = grant.changed() => {
-							notify_demand(&pad);
-							if result.is_err() {
-								return;
-							}
+					}
+					result = async {
+						match &mut grant {
+							Some(grant) => grant.changed().await,
+							None => std::future::pending().await,
+						}
+					} => {
+						notify_demand(&pad);
+						if result.is_err() {
+							return;
 						}
 					}
 				}
-			})
-		} else {
-			RUNTIME.spawn(async move {
-				loop {
-					let closed = demand.wanted_changed().await.is_err();
-					notify_demand(&pad);
-					if closed {
-						return;
-					}
-				}
-			})
-		});
+			}
+		}));
+	}
+
+	fn stop_watch(&mut self) {
+		if let Some(task) = self.watch_task.take() {
+			task.abort();
+		}
+	}
+
+	/// Retune the live reservation. Returns whether the property's structure changed immediately.
+	fn set_ceiling(&mut self, ceiling: u64, pad: glib::WeakRef<MoqSinkPad>) -> bool {
+		match (&self.reservation, ceiling) {
+			(Some(reservation), 1..) => {
+				reservation.update(moq_net::bandwidth::Rate::from_bps(ceiling));
+				false
+			}
+			(None, 0) => false,
+			_ => {
+				self.stop_watch();
+				self.reservation = (ceiling > 0).then(|| {
+					self.allocator
+						.reserve(&self.demand, moq_net::bandwidth::Rate::from_bps(ceiling))
+				});
+				self.grant = self.reservation.as_ref().map(moq_net::bandwidth::Reservation::consume);
+				self.watch(pad);
+				true
+			}
+		}
 	}
 
 	fn snapshot(&self) -> gst::Structure {
@@ -155,12 +181,9 @@ impl Bandwidth {
 
 impl Drop for Bandwidth {
 	fn drop(&mut self) {
-		if let Some(task) = self.watch_task.take() {
-			task.abort();
-		}
 		// Abort the watcher before releasing the claim. A task already running may still notify, but the
 		// property getter reads the current lifecycle rather than stale task state.
-		self.reservation.take();
+		self.stop_watch();
 	}
 }
 
@@ -248,9 +271,11 @@ impl PadLifecycle {
 	pub(super) fn fail(&mut self, reason: String) -> Notifications {
 		let error = self.settings.error.is_none();
 		self.settings.error.get_or_insert(reason);
+		let demand = self.bandwidth.take().is_some();
 		Notifications {
 			status: self.settings.set_status(Status::Error),
 			error,
+			demand,
 			..Default::default()
 		}
 	}
@@ -258,8 +283,10 @@ impl PadLifecycle {
 	/// Record clean finalization unless the failure is the more useful terminal state.
 	pub(super) fn end(&mut self) -> Notifications {
 		let status = self.settings.status != Status::Error && self.settings.set_status(Status::Ended);
+		let demand = self.bandwidth.take().is_some();
 		Notifications {
 			status,
+			demand,
 			..Default::default()
 		}
 	}
@@ -322,7 +349,7 @@ impl ObjectImpl for MoqSinkPadImp {
 						"Maximum bitrate in bits per second for the encoder feeding this track. A \
 						 nonzero value reserves a fair share of the connection estimate and exposes \
 						 it through track-demand; zero observes demand without taking a reservation. \
-						 Writable until CAPS reserves the track",
+						 Writable before and while the pad is active; changes retune the live reservation",
 					)
 					.default_value(0)
 					.mutable_playing()
@@ -369,8 +396,24 @@ impl ObjectImpl for MoqSinkPadImp {
 			);
 			return;
 		}
+		if pspec.name() == "bandwidth-ceiling"
+			&& (lifecycle.settings.effective.is_none() || lifecycle.bandwidth.is_some())
+		{
+			let ceiling = value.get().unwrap();
+			lifecycle.settings.bandwidth_ceiling = ceiling;
+			let demand = lifecycle
+				.bandwidth
+				.as_mut()
+				.is_some_and(|bandwidth| bandwidth.set_ceiling(ceiling, self.obj().downgrade()));
+			drop(lifecycle);
+			if demand {
+				self.obj().notify("track-demand");
+			}
+			return;
+		}
 		// A producer keeps its setup for its whole life, so a later write would read back without ever
-		// reaching the live track or its reservation.
+		// reaching the live track. The bandwidth ceiling is handled above because its reservation can
+		// be retuned without replacing the producer.
 		if lifecycle.settings.effective.is_some() {
 			gst::warning!(
 				CAT,
@@ -386,7 +429,6 @@ impl ObjectImpl for MoqSinkPadImp {
 				lifecycle.settings.requested = value.get::<Option<String>>().unwrap().filter(|name| !name.is_empty())
 			}
 			"container" => lifecycle.settings.container = value.get().unwrap(),
-			"bandwidth-ceiling" => lifecycle.settings.bandwidth_ceiling = value.get().unwrap(),
 			_ => unreachable!(),
 		}
 	}
@@ -576,17 +618,81 @@ mod tests {
 		pad.set_property("container", MediaContainer::Legacy);
 		pad.set_property("bandwidth-ceiling", 8_000_000u64);
 		assert_eq!(pad.property::<MediaContainer>("container"), MediaContainer::Loc);
-		assert_eq!(pad.property::<u64>("bandwidth-ceiling"), 4_000_000);
+		assert_eq!(pad.property::<u64>("bandwidth-ceiling"), 8_000_000);
 		apply(&pad, PadLifecycle::reset);
 		pad.set_property("container", MediaContainer::Legacy);
-		pad.set_property("bandwidth-ceiling", 8_000_000u64);
+		pad.set_property("bandwidth-ceiling", 12_000_000u64);
 		assert_eq!(
 			pad.property::<String>("track"),
 			"camera",
 			"the write rejected after reservation was not retained for the next run"
 		);
 		assert_eq!(pad.property::<MediaContainer>("container"), MediaContainer::Legacy);
-		assert_eq!(pad.property::<u64>("bandwidth-ceiling"), 8_000_000);
+		assert_eq!(pad.property::<u64>("bandwidth-ceiling"), 12_000_000);
+	}
+
+	#[test]
+	fn a_live_bandwidth_ceiling_can_be_retuned_or_released() {
+		let pad = sink_pad();
+		let estimate = moq_net::bandwidth::Producer::new();
+		estimate
+			.set(Some(moq_net::bandwidth::Rate::from_bps(10_000_000)))
+			.unwrap();
+		let allocator = moq_net::bandwidth::Allocator::new(estimate.consume());
+		let broadcast = moq_net::broadcast::Info::default().produce();
+		let track = broadcast
+			.create_track("camera", moq_net::track::Info::default())
+			.unwrap();
+		let bandwidth = Bandwidth::new(track.demand(), allocator, 4_000_000);
+		let old_grant = bandwidth.grant.clone().unwrap();
+		pad.lifecycle().bandwidth = Some(bandwidth);
+
+		assert_eq!(old_grant.peek().map(|rate| rate.as_bps()), Some(4_000_000));
+		pad.set_property("bandwidth-ceiling", 8_000_000u64);
+		assert_eq!(old_grant.peek().map(|rate| rate.as_bps()), Some(8_000_000));
+
+		pad.set_property("bandwidth-ceiling", 0u64);
+		assert_eq!(old_grant.peek(), None, "the released reservation is unavailable");
+		let state = pad.property::<gst::Structure>("track-demand");
+		assert!(!state.has_field("probed"));
+		assert!(!state.has_field("grant-bps"));
+
+		pad.set_property("bandwidth-ceiling", 6_000_000u64);
+		let state = pad.property::<gst::Structure>("track-demand");
+		assert_eq!(state.get::<u64>("grant-bps"), Ok(6_000_000));
+	}
+
+	#[test]
+	fn terminal_pads_release_their_bandwidth_claims() {
+		let estimate = moq_net::bandwidth::Producer::new();
+		estimate
+			.set(Some(moq_net::bandwidth::Rate::from_bps(10_000_000)))
+			.unwrap();
+		let allocator = moq_net::bandwidth::Allocator::new(estimate.consume());
+		let _allocator_guard = allocator.clone();
+		let broadcast = moq_net::broadcast::Info::default().produce();
+
+		let ended = sink_pad();
+		let track = broadcast
+			.create_track("ended", moq_net::track::Info::default())
+			.unwrap();
+		let bandwidth = Bandwidth::new(track.demand(), allocator.clone(), 4_000_000);
+		let ended_grant = bandwidth.grant.clone().unwrap();
+		ended.lifecycle().bandwidth = Some(bandwidth);
+		apply(&ended, PadLifecycle::end);
+		assert!(ended.property::<Option<gst::Structure>>("track-demand").is_none());
+		assert_eq!(ended_grant.peek(), None);
+
+		let failed = sink_pad();
+		let track = broadcast
+			.create_track("failed", moq_net::track::Info::default())
+			.unwrap();
+		let bandwidth = Bandwidth::new(track.demand(), allocator, 4_000_000);
+		let failed_grant = bandwidth.grant.clone().unwrap();
+		failed.lifecycle().bandwidth = Some(bandwidth);
+		apply(&failed, |lifecycle| lifecycle.fail("bad bitstream".to_string()));
+		assert!(failed.property::<Option<gst::Structure>>("track-demand").is_none());
+		assert_eq!(failed_grant.peek(), None);
 	}
 
 	#[test]
