@@ -830,6 +830,22 @@ impl TrackState {
 		{
 			return;
 		}
+		Self::refresh(state);
+	}
+
+	/// A reader of group `sequence` reached a frame its copy shed: ask for a new group as
+	/// a join over [`Info::refresh`] does, if it is the newest and the track opts in. An
+	/// older group's reader moves on to the groups after it instead.
+	pub(super) fn shed_read(state: kio::Ref<'_, TrackState>, sequence: u64) {
+		let opted = state.info.as_ref().is_some_and(|info| info.refresh.is_some());
+		if opted && state.latest_group == Some(sequence) {
+			Self::refresh(state);
+		}
+	}
+
+	/// Ask for a group past every sequence written, releasing the read guard before
+	/// locking the demand.
+	fn refresh(state: kio::Ref<'_, TrackState>) {
 		let subscriptions = state.subscriptions.clone();
 		drop(state);
 		let mut wakes = subscriptions.lock().refresh();
@@ -2163,6 +2179,7 @@ impl TrackState {
 		let average = pool.average().unwrap_or(0);
 		let mut paid = 0u64;
 		let mut scanned = 0usize;
+		let mut fresh = Vec::new();
 		for _ in 0..self.evict.len() {
 			if self.debt == 0 || paid >= cap || scanned >= EVICT_SCAN {
 				break;
@@ -2192,9 +2209,11 @@ impl TrackState {
 			scanned += 1;
 			// Protected: accessed more recently than the average (a fresh insert,
 			// an active reader, or a FETCH hit, which also covers a backfill still
-			// being filled). Rotate to the back.
+			// being filled). Rotate to the back, but shed its front below if the debt
+			// outlives the scan.
 			if slot.cache_accessed() > average {
 				self.evict.push_back((sequence, stamp));
+				fresh.push(sequence);
 				continue;
 			}
 			// The full footprint including overhead, so even empty groups repay
@@ -2208,6 +2227,22 @@ impl TrackState {
 			self.debt -= size;
 			paid = paid.saturating_add(size);
 			self.uncache(sequence).unwrap().abort(Error::Evicted);
+		}
+		// No cold group left to pay with: shed the front of the groups that could not go
+		// whole, the ones being read and then the live edge, so neither grows without bound.
+		fresh.extend(self.latest_group.filter(|latest| self.protects(*latest)));
+		for sequence in fresh {
+			if self.debt == 0 || paid >= cap {
+				break;
+			}
+			let Some(slot) = self.lookup.get(&sequence) else {
+				continue;
+			};
+			for group in slot.copies() {
+				let freed = group.shed(self.debt, cap - paid.min(cap));
+				self.debt -= freed.min(self.debt);
+				paid = paid.saturating_add(freed);
+			}
 		}
 		paid
 	}
@@ -21009,8 +21044,9 @@ mod test {
 	fn canonical_content_preserves_individually_valid_disjoint_ranges() {
 		let producer = track_producer("test", Info::timed());
 		let mut live = producer.create_group(group::Info { sequence: 0 }).unwrap();
-		live.start_at(group::MAX_GROUP_FRAMES as u64).unwrap();
-		for _ in 0..group::MAX_GROUP_FRAMES {
+		const FRAMES: usize = 8192;
+		live.start_at(FRAMES as u64).unwrap();
+		for _ in 0..FRAMES {
 			live.write_frame(Timestamp::ZERO, bytes::Bytes::new()).unwrap();
 		}
 		let mut head = producer
@@ -21022,8 +21058,90 @@ mod test {
 			.unwrap();
 		head.write_frame(Timestamp::ZERO, bytes::Bytes::new()).unwrap();
 		head.finish().unwrap();
-		assert_eq!(live.handle().content().unwrap().cost().0, group::MAX_GROUP_FRAMES + 1);
-		assert_eq!(live.frame_count(), 2 * group::MAX_GROUP_FRAMES);
+		assert_eq!(live.handle().content().unwrap().cost().0, FRAMES + 1);
+		assert_eq!(live.frame_count(), 2 * FRAMES);
 		assert_eq!(head.frame_count(), 1);
+	}
+
+	/// Frame `index` of the groups below: 16 KiB naming its index.
+	fn numbered(index: u32) -> bytes::Bytes {
+		bytes::Bytes::from(index.to_le_bytes().repeat(4096))
+	}
+
+	/// One live group grows through a pool far smaller than it: pool debt sheds its front,
+	/// memory stays near the pool, a reader that keeps up reads every frame, and a late
+	/// reader is `Evicted`.
+	#[test]
+	#[cfg(feature = "async")]
+	fn a_live_group_sheds_its_front_under_pressure() {
+		const POOL: u64 = 4 * 1024 * 1024;
+		let pool = cache::Pool::new(cache::Config::default().with_capacity(POOL));
+		let producer = track_producer_pooled("test", pool.clone());
+		let mut live = producer.create_group(group::Info { sequence: 0 }).unwrap();
+		let mut reader = live.consume();
+		let mut late = live.consume();
+		// 48 MiB, past the 32 MiB tail: pool debt sheds first.
+		for index in 0..3_000 {
+			live.write_frame(Timestamp::ZERO, numbered(index)).unwrap();
+			let frame = reader.read_frame().now_or_never().unwrap();
+			let frame = frame.unwrap_or_else(|err| panic!("frame {index}: {err}")).unwrap();
+			assert_eq!(frame.payload, numbered(index));
+			assert!(pool.used() < 2 * POOL, "frame {index}: {} bytes held", pool.used());
+		}
+		assert!(matches!(late.read_frame().now_or_never().unwrap(), Err(Error::Evicted)));
+		assert!(!live.is_aborted(), "shedding never ends the group");
+	}
+
+	/// A join onto a group whose first frame was shed asks for a new group on a track that
+	/// opts into refresh, rather than reading a group it could only see `Evicted` in.
+	#[test]
+	fn a_join_past_a_shed_first_frame_wants_a_new_group() {
+		let pool = cache::Pool::new(cache::Config::default().with_capacity(256 * 1024));
+		let producer = Producer::new(
+			Arc::new(broadcast::Info {
+				pool,
+				..Default::default()
+			}),
+			"test",
+			Info::default().with_refresh(1_000_000),
+		);
+		let mut live = producer.append_group().unwrap();
+		for index in 0..1_000 {
+			live.write_frame(None, numbered(index)).unwrap();
+		}
+		let _subscriber = producer.subscribe(None);
+		assert_eq!(producer.demand().wanted(), Some(1));
+	}
+
+	/// A reader that reaches a shed frame of the newest group asks for a new group on a
+	/// track that opts into refresh.
+	#[test]
+	#[cfg(feature = "async")]
+	fn a_reader_at_a_shed_frame_wants_a_new_group() {
+		let pool = cache::Pool::new(cache::Config::default().with_capacity(256 * 1024));
+		let producer = Producer::new(
+			Arc::new(broadcast::Info {
+				pool,
+				..Default::default()
+			}),
+			"test",
+			Info::default().with_refresh(1_000_000),
+		);
+		// Joined before the group grew, so the join asks for nothing.
+		let _subscriber = producer.subscribe(None);
+		let mut live = producer.append_group().unwrap();
+		let mut reader = live.consume();
+		for index in 0..1_000 {
+			live.write_frame(None, numbered(index)).unwrap();
+		}
+		assert_eq!(producer.demand().wanted(), Some(0), "nothing asked yet");
+		assert!(matches!(
+			reader.read_frame().now_or_never().unwrap(),
+			Err(Error::Evicted)
+		));
+		assert_eq!(producer.demand().wanted(), Some(1), "the reader asked");
+
+		let _joined = producer.subscribe(None);
+		assert_eq!(producer.demand().wanted(), Some(1), "a join asks for the same group");
 	}
 }

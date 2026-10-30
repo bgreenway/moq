@@ -3214,6 +3214,54 @@ mod test {
 		);
 	}
 
+	/// A fetched reader whose copy shed the frame it reads next gets `Evicted`, rather than
+	/// recovering onto the same copy again.
+	#[test]
+	#[cfg(feature = "async")]
+	fn a_fetched_reader_past_a_shed_front_gets_evicted() {
+		let routes = Producer::new();
+		let a = copy();
+		routes.serve(a.consume());
+		let mut open = a.create_group(group::Info { sequence: 0 }).unwrap();
+		open.write_frame(ts(0), b"a".as_ref()).unwrap();
+		let mut fetched = logical(&routes)
+			.consume()
+			.fetch_group(0, None)
+			.now_or_never()
+			.unwrap()
+			.unwrap();
+		assert_eq!(read(&mut fetched), Some(b"a".to_vec()));
+		for _ in 0..40 {
+			open.write_frame(ts(0), vec![0u8; 1 << 20]).unwrap();
+		}
+		let res = fetched.read_frame().now_or_never().expect("not parked");
+		assert!(matches!(res, Err(Error::Evicted)), "{res:?}");
+	}
+
+	/// The same holds for a plain reader of a compressed group whose inflated copy shed the
+	/// frame while the stored slice stays.
+	#[test]
+	#[cfg(feature = "async")]
+	fn a_fetched_plain_reader_past_a_shed_inflated_front_gets_evicted() {
+		let info = crate::track::Info::timed().with_compress(true);
+		let routes = Producer::new();
+		let a = track::Producer::new(Arc::new(broadcast::Info::default()), "video", info.clone());
+		routes.serve(a.consume());
+		let mut open = a.create_group(group::Info { sequence: 0 }).unwrap();
+		let mut drain = open.consume();
+		// Two frames that compress to almost nothing, but inflate past the tail together.
+		for _ in 0..2 {
+			open.write_frame(ts(0), vec![0u8; 31 << 20]).unwrap();
+			assert!(read(&mut drain).is_some());
+		}
+		let logical = track::Request::new(Arc::new(broadcast::Info::default()), "video")
+			.routes(routes.consume())
+			.accept(info);
+		let mut fetched = logical.consume().fetch_group(0, None).now_or_never().unwrap().unwrap();
+		let res = fetched.read_frame().now_or_never().expect("not parked");
+		assert!(matches!(res, Err(Error::Evicted)), "{res:?}");
+	}
+
 	/// A group first read while only one copy existed is still backed by a later copy that
 	/// holds it, so a failure continues from that copy instead of waiting out the budget.
 	#[test]

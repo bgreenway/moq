@@ -3888,7 +3888,7 @@ mod tests {
 		assert_eq!(rest[1].timestamp, ts(30_000));
 	}
 
-	/// A live group that outgrows its cache budget is aborted. A reader whose current
+	/// A live group its upstream gave up as too large is aborted. A reader whose current
 	/// group died that way skips forward; the gap is not a decode error.
 	#[tokio::test]
 	async fn oversized_group_skips_to_next() {
@@ -3907,22 +3907,7 @@ mod tests {
 		Container::Legacy(crate::container::Kind::Data)
 			.write(&mut group0, &[first])
 			.unwrap();
-		// Stay under the per-frame cap (hang prefixes a timestamp) so this is a group overflow,
-		// not FrameTooLarge.
-		let overflow = Frame {
-			timestamp: ts(0),
-			payload: Bytes::from(vec![0u8; (moq_net::group::MAX_CACHE_BYTES - 1024) as usize]),
-			keyframe: false,
-			duration: None,
-		};
-		let overflowed = Container::Legacy(crate::container::Kind::Data).write(&mut group0, &[overflow]);
-		assert!(
-			matches!(
-				overflowed,
-				Err(crate::Error::Hang(hang::Error::Moq(moq_net::Error::GroupTooLarge)))
-			),
-			"oversized group must abort as GroupTooLarge, got {overflowed:?}"
-		);
+		group0.abort(moq_net::Error::GroupTooLarge).unwrap();
 
 		write_group(&mut track, 1, &[ts(30_000)]);
 		track.finish().unwrap();

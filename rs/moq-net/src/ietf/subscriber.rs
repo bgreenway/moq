@@ -13665,15 +13665,6 @@ mod stitch_tests {
 		h.dispatch_refused().await;
 	}
 
-	/// More objects than a group may hold.
-	#[moq_clock::test]
-	async fn an_oversized_group_is_refused() {
-		// Each empty object is its delta, a zero size, and the Normal status.
-		let objects = vec![0u64; 3 * (crate::group::MAX_GROUP_FRAMES + 1)];
-		let h = Harness::with_timescale(Fill::Done, vec![raw_stream(SEQUENCE, &objects, &[])], None);
-		h.dispatch_refused().await;
-	}
-
 	/// A second stream for a group the track already holds.
 	#[moq_clock::test]
 	async fn a_second_stream_for_a_group_is_refused() {
