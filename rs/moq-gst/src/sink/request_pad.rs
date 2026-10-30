@@ -257,6 +257,10 @@ impl PadLifecycle {
 		pad: &MoqSinkPad,
 	) -> Notifications {
 		let mut changes = self.commit(track);
+		// CAPS renegotiation replaces the media producer. Retire the old producer's demand and
+		// reservation before binding the replacement, while resume paths use `restore_bandwidth`
+		// directly because their retained producer still owns the same demand.
+		self.bandwidth = None;
 		changes.demand = self.restore_bandwidth(allocator, pad).is_some();
 		changes
 	}

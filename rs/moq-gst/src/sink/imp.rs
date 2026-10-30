@@ -1683,6 +1683,59 @@ mod tests {
 		);
 	}
 
+	#[test]
+	fn codec_renegotiation_rebinds_bandwidth_to_the_new_track() {
+		let run = CatalogRun::new();
+		let video = run.pad("camera");
+		video.set_property("bandwidth-ceiling", 4_000_000u64);
+		let _catalog = run.start();
+
+		let estimate = moq_net::bandwidth::Producer::new();
+		estimate
+			.set(Some(moq_net::bandwidth::Rate::from_bps(4_000_000)))
+			.unwrap();
+		run.0
+			.imp()
+			.control
+			.lock()
+			.unwrap()
+			.live
+			.as_mut()
+			.unwrap()
+			.session
+			.replace_bandwidth(moq_net::bandwidth::Allocator::new(estimate.consume()));
+
+		assert!(negotiate(&video, &h264_caps()));
+		let broadcast = run
+			.0
+			.imp()
+			.control
+			.lock()
+			.unwrap()
+			.live
+			.as_ref()
+			.unwrap()
+			.broadcast
+			.consume();
+		let _old_reader = broadcast.track("camera").unwrap().subscribe(None);
+		assert_eq!(
+			video
+				.property::<Option<gst::Structure>>("track-demand")
+				.unwrap()
+				.get::<bool>("wanted"),
+			Ok(true)
+		);
+
+		let vp8 = gst::Caps::builder("video/x-vp8").build();
+		assert!(video.send_event(gst::event::Caps::new(&vp8)));
+		let _new_reader = broadcast.track("camera/1").unwrap().subscribe(None);
+		let rebound = video
+			.property::<Option<gst::Structure>>("track-demand")
+			.expect("renegotiation keeps demand reporting active");
+		assert_eq!(rebound.get::<bool>("wanted"), Ok(true));
+		assert_eq!(rebound.get::<u64>("grant-bps"), Ok(4_000_000));
+	}
+
 	// GStreamer keeps CAPS sticky across a flush, so a resumed pad gets no new CAPS event. EOS ended its
 	// track, so the resumed one takes a fresh name.
 	#[test]
