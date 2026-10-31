@@ -56,6 +56,8 @@ for event, err := range announced.All(ctx) {
 		fmt.Println("got broadcast", event.Announce.Prefix)
 	case moq.AnnounceEventRestart: // a new publisher run at the same path
 		fmt.Println("restarted broadcast", event.Announce.Prefix)
+	case moq.AnnounceEventTakeover: // continues what an earlier route served
+		fmt.Println("took over broadcast", event.Announce.Prefix)
 	}
 }
 ```

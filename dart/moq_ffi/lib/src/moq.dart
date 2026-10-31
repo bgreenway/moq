@@ -7723,6 +7723,12 @@ class FfiConverterMoqAnnounceEvent {
           lifted.value,
           lifted.bytesRead - subview.offsetInBytes + 4,
         );
+      case 5:
+        final lifted = TakeoverMoqAnnounceEvent.read(subview);
+        return LiftRetVal<MoqAnnounceEvent>(
+          lifted.value,
+          lifted.bytesRead - subview.offsetInBytes + 4,
+        );
       default:
         throw UniffiInternalError(
           UniffiInternalError.unexpectedEnumCase,
@@ -7890,6 +7896,65 @@ class RestartMoqAnnounceEvent extends MoqAnnounceEvent {
     int new_offset = buf.offsetInBytes + 4;
     new_offset += FfiConverterMoqAnnounce.write(
       announce,
+      Uint8List.view(buf.buffer, new_offset),
+    );
+    return new_offset;
+  }
+}
+
+class TakeoverMoqAnnounceEvent extends MoqAnnounceEvent {
+  final MoqAnnounce announce;
+  final String predecessor;
+  TakeoverMoqAnnounceEvent({
+    required MoqAnnounce this.announce,
+    required String this.predecessor,
+  });
+  TakeoverMoqAnnounceEvent._(
+    MoqAnnounce this.announce,
+    String this.predecessor,
+  );
+  static LiftRetVal<TakeoverMoqAnnounceEvent> read(Uint8List buf) {
+    int new_offset = buf.offsetInBytes;
+    final announce_lifted = FfiConverterMoqAnnounce.read(
+      Uint8List.view(buf.buffer, new_offset),
+    );
+    final announce = announce_lifted.value;
+    new_offset += announce_lifted.bytesRead;
+    final predecessor_lifted = FfiConverterString.read(
+      Uint8List.view(buf.buffer, new_offset),
+    );
+    final predecessor = predecessor_lifted.value;
+    new_offset += predecessor_lifted.bytesRead;
+    return LiftRetVal(
+      TakeoverMoqAnnounceEvent._(announce, predecessor),
+      new_offset,
+    );
+  }
+
+  @override
+  RustBuffer lower() {
+    final buf = Uint8List(allocationSize());
+    write(buf);
+    return toRustBuffer(buf);
+  }
+
+  @override
+  int allocationSize() {
+    return FfiConverterMoqAnnounce.allocationSize(announce) +
+        FfiConverterString.allocationSize(predecessor) +
+        4;
+  }
+
+  @override
+  int write(Uint8List buf) {
+    buf.buffer.asByteData(buf.offsetInBytes).setInt32(0, 5);
+    int new_offset = buf.offsetInBytes + 4;
+    new_offset += FfiConverterMoqAnnounce.write(
+      announce,
+      Uint8List.view(buf.buffer, new_offset),
+    );
+    new_offset += FfiConverterString.write(
+      predecessor,
       Uint8List.view(buf.buffer, new_offset),
     );
     return new_offset;

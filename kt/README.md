@@ -31,10 +31,12 @@ import kotlinx.coroutines.flow.collect
 // connect() wires up an internal origin and returns a live connection.
 Moq.connect("https://relay.example.com").use { moq ->
     moq.announced(AnnounceConfig(prefix = "demos/", filter = "*/camera")).updates().collect { event ->
-        // A restart is a new publisher run at the same path: request it again.
+        // A restart is a new publisher run at the same path: request it again. A takeover
+        // continues what an earlier route served, like a start.
         val announce = when (event) {
             is AnnounceEventStart -> event.announce
             is AnnounceEventRestart -> event.announce
+            is AnnounceEventTakeover -> event.announce
             else -> return@collect // Update or End
         }
         // Prefix stays origin-relative; captures reports what * matched.
