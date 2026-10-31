@@ -12624,16 +12624,15 @@ abstract class MoqFillInterface {
   MoqGroupProducer accept({required int sequence});
   void dropGroups({required int start, required int end});
   int endGroup();
-  bool isUsed();
   bool isWanted({required int sequence});
   Duration? maxDelay();
-  int? next();
   MoqOrder order();
   int priority();
   int startFrame();
   int startGroup();
-  UniffiRustFuture<void> unused();
   UniffiRustFuture<void> unwanted({required int sequence});
+  int? wanted();
+  UniffiRustFuture<int?> wantedChanged();
 }
 
 final _MoqFillFinalizer = Finalizer<Pointer<Void>>((ptr) {
@@ -12699,17 +12698,6 @@ class MoqFill implements MoqFillInterface {
     );
   }
 
-  bool isUsed() {
-    return rustCallWithLifter(
-      (status) => uniffi_moq_ffi_fn_method_moqfill_is_used(
-        uniffiClonePointer(),
-        status,
-      ),
-      FfiConverterBool.lift,
-      null,
-    );
-  }
-
   bool isWanted({required int sequence}) {
     return rustCallWithLifter(
       (status) => uniffi_moq_ffi_fn_method_moqfill_is_wanted(
@@ -12729,15 +12717,6 @@ class MoqFill implements MoqFillInterface {
         status,
       ),
       FfiConverterOptionalDuration.lift,
-      null,
-    );
-  }
-
-  int? next() {
-    return rustCallWithLifter(
-      (status) =>
-          uniffi_moq_ffi_fn_method_moqfill_next(uniffiClonePointer(), status),
-      FfiConverterOptionalUInt64.lift,
       null,
     );
   }
@@ -12784,18 +12763,6 @@ class MoqFill implements MoqFillInterface {
     );
   }
 
-  UniffiRustFuture<void> unused() {
-    return uniffiRustCallAsync(
-      () => uniffi_moq_ffi_fn_method_moqfill_unused(uniffiClonePointer()),
-      ffi_moq_ffi_rust_future_poll_void,
-      ffi_moq_ffi_rust_future_complete_void,
-      ffi_moq_ffi_rust_future_cancel_void,
-      ffi_moq_ffi_rust_future_free_void,
-      (_) {},
-      moqExceptionErrorHandler,
-    );
-  }
-
   UniffiRustFuture<void> unwanted({required int sequence}) {
     return uniffiRustCallAsync(
       () => uniffi_moq_ffi_fn_method_moqfill_unwanted(
@@ -12807,6 +12774,28 @@ class MoqFill implements MoqFillInterface {
       ffi_moq_ffi_rust_future_cancel_void,
       ffi_moq_ffi_rust_future_free_void,
       (_) {},
+      moqExceptionErrorHandler,
+    );
+  }
+
+  int? wanted() {
+    return rustCallWithLifter(
+      (status) =>
+          uniffi_moq_ffi_fn_method_moqfill_wanted(uniffiClonePointer(), status),
+      FfiConverterOptionalUInt64.lift,
+      null,
+    );
+  }
+
+  UniffiRustFuture<int?> wantedChanged() {
+    return uniffiRustCallAsync(
+      () =>
+          uniffi_moq_ffi_fn_method_moqfill_wanted_changed(uniffiClonePointer()),
+      ffi_moq_ffi_rust_future_poll_rust_buffer,
+      ffi_moq_ffi_rust_future_complete_rust_buffer,
+      ffi_moq_ffi_rust_future_cancel_rust_buffer,
+      ffi_moq_ffi_rust_future_free_rust_buffer,
+      FfiConverterOptionalUInt64.lift,
       moqExceptionErrorHandler,
     );
   }
@@ -18874,14 +18863,6 @@ external int uniffi_moq_ffi_fn_method_moqfill_end_group(
   Pointer<RustCallStatus> uniffiStatus,
 );
 
-@Native<Int8 Function(Pointer<Void>, Pointer<RustCallStatus>)>(
-  assetId: _uniffiAssetId,
-)
-external int uniffi_moq_ffi_fn_method_moqfill_is_used(
-  Pointer<Void> ptr,
-  Pointer<RustCallStatus> uniffiStatus,
-);
-
 @Native<Int8 Function(Pointer<Void>, Uint64, Pointer<RustCallStatus>)>(
   assetId: _uniffiAssetId,
 )
@@ -18895,14 +18876,6 @@ external int uniffi_moq_ffi_fn_method_moqfill_is_wanted(
   assetId: _uniffiAssetId,
 )
 external RustBuffer uniffi_moq_ffi_fn_method_moqfill_max_delay(
-  Pointer<Void> ptr,
-  Pointer<RustCallStatus> uniffiStatus,
-);
-
-@Native<RustBuffer Function(Pointer<Void>, Pointer<RustCallStatus>)>(
-  assetId: _uniffiAssetId,
-)
-external RustBuffer uniffi_moq_ffi_fn_method_moqfill_next(
   Pointer<Void> ptr,
   Pointer<RustCallStatus> uniffiStatus,
 );
@@ -18939,15 +18912,23 @@ external int uniffi_moq_ffi_fn_method_moqfill_start_group(
   Pointer<RustCallStatus> uniffiStatus,
 );
 
-@Native<Pointer<Void> Function(Pointer<Void>)>(assetId: _uniffiAssetId)
-external Pointer<Void> uniffi_moq_ffi_fn_method_moqfill_unused(
-  Pointer<Void> ptr,
-);
-
 @Native<Pointer<Void> Function(Pointer<Void>, Uint64)>(assetId: _uniffiAssetId)
 external Pointer<Void> uniffi_moq_ffi_fn_method_moqfill_unwanted(
   Pointer<Void> ptr,
   int sequence,
+);
+
+@Native<RustBuffer Function(Pointer<Void>, Pointer<RustCallStatus>)>(
+  assetId: _uniffiAssetId,
+)
+external RustBuffer uniffi_moq_ffi_fn_method_moqfill_wanted(
+  Pointer<Void> ptr,
+  Pointer<RustCallStatus> uniffiStatus,
+);
+
+@Native<Pointer<Void> Function(Pointer<Void>)>(assetId: _uniffiAssetId)
+external Pointer<Void> uniffi_moq_ffi_fn_method_moqfill_wanted_changed(
+  Pointer<Void> ptr,
 );
 
 @Native<Pointer<Void> Function(Pointer<Void>, Pointer<RustCallStatus>)>(
@@ -20488,16 +20469,10 @@ external int uniffi_moq_ffi_checksum_method_moqfill_drop_groups();
 external int uniffi_moq_ffi_checksum_method_moqfill_end_group();
 
 @Native<Uint16 Function()>(assetId: _uniffiAssetId)
-external int uniffi_moq_ffi_checksum_method_moqfill_is_used();
-
-@Native<Uint16 Function()>(assetId: _uniffiAssetId)
 external int uniffi_moq_ffi_checksum_method_moqfill_is_wanted();
 
 @Native<Uint16 Function()>(assetId: _uniffiAssetId)
 external int uniffi_moq_ffi_checksum_method_moqfill_max_delay();
-
-@Native<Uint16 Function()>(assetId: _uniffiAssetId)
-external int uniffi_moq_ffi_checksum_method_moqfill_next();
 
 @Native<Uint16 Function()>(assetId: _uniffiAssetId)
 external int uniffi_moq_ffi_checksum_method_moqfill_order();
@@ -20512,10 +20487,13 @@ external int uniffi_moq_ffi_checksum_method_moqfill_start_frame();
 external int uniffi_moq_ffi_checksum_method_moqfill_start_group();
 
 @Native<Uint16 Function()>(assetId: _uniffiAssetId)
-external int uniffi_moq_ffi_checksum_method_moqfill_unused();
+external int uniffi_moq_ffi_checksum_method_moqfill_unwanted();
 
 @Native<Uint16 Function()>(assetId: _uniffiAssetId)
-external int uniffi_moq_ffi_checksum_method_moqfill_unwanted();
+external int uniffi_moq_ffi_checksum_method_moqfill_wanted();
+
+@Native<Uint16 Function()>(assetId: _uniffiAssetId)
+external int uniffi_moq_ffi_checksum_method_moqfill_wanted_changed();
 
 @Native<Uint16 Function()>(assetId: _uniffiAssetId)
 external int uniffi_moq_ffi_checksum_method_moqgroupproducer_abort();
@@ -21207,16 +21185,10 @@ void _checkApiChecksums() {
   if (uniffi_moq_ffi_checksum_method_moqfill_end_group() != 42504) {
     throw UniffiInternalError.panicked("UniFFI API checksum mismatch");
   }
-  if (uniffi_moq_ffi_checksum_method_moqfill_is_used() != 6429) {
-    throw UniffiInternalError.panicked("UniFFI API checksum mismatch");
-  }
   if (uniffi_moq_ffi_checksum_method_moqfill_is_wanted() != 47156) {
     throw UniffiInternalError.panicked("UniFFI API checksum mismatch");
   }
   if (uniffi_moq_ffi_checksum_method_moqfill_max_delay() != 1258) {
-    throw UniffiInternalError.panicked("UniFFI API checksum mismatch");
-  }
-  if (uniffi_moq_ffi_checksum_method_moqfill_next() != 7725) {
     throw UniffiInternalError.panicked("UniFFI API checksum mismatch");
   }
   if (uniffi_moq_ffi_checksum_method_moqfill_order() != 32232) {
@@ -21231,10 +21203,13 @@ void _checkApiChecksums() {
   if (uniffi_moq_ffi_checksum_method_moqfill_start_group() != 8622) {
     throw UniffiInternalError.panicked("UniFFI API checksum mismatch");
   }
-  if (uniffi_moq_ffi_checksum_method_moqfill_unused() != 3173) {
+  if (uniffi_moq_ffi_checksum_method_moqfill_unwanted() != 13637) {
     throw UniffiInternalError.panicked("UniFFI API checksum mismatch");
   }
-  if (uniffi_moq_ffi_checksum_method_moqfill_unwanted() != 13637) {
+  if (uniffi_moq_ffi_checksum_method_moqfill_wanted() != 65141) {
+    throw UniffiInternalError.panicked("UniFFI API checksum mismatch");
+  }
+  if (uniffi_moq_ffi_checksum_method_moqfill_wanted_changed() != 42560) {
     throw UniffiInternalError.panicked("UniFFI API checksum mismatch");
   }
   if (uniffi_moq_ffi_checksum_method_moqgroupproducer_abort() != 59787) {
