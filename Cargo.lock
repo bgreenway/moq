@@ -5893,6 +5893,24 @@ dependencies = [
 ]
 
 [[package]]
+name = "moq-sign"
+version = "0.0.1"
+dependencies = [
+ "aws-lc-rs",
+ "bench-harness",
+ "bytes",
+ "data-encoding",
+ "hex",
+ "kio 0.6.2",
+ "moq-net",
+ "serde_json",
+ "tempfile",
+ "thiserror 2.0.21",
+ "tokio",
+ "zeroize",
+]
+
+[[package]]
 name = "moq-sock"
 version = "0.2.0"
 dependencies = [
