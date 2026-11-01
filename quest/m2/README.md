@@ -92,6 +92,7 @@ lite-07; bitrate enforcement is not part of this release.
 - [Front parking](/quest/m2/origin-front-parks.md) - an unroutable request waits on a front instead of re-asking on every route-table move
 - [Route wakes](/quest/m2/route-wakes.md) - a route change wakes only the fronts it can move, so pool churn stops scaling with served paths
 - [Fewer allocations in announce fan-out](/quest/m2/announce-fanout-allocs.md) - a deep path costs no more allocations per subscriber than a shallow one
+- [moq-room scales to large rooms](/quest/m2/room-bench.md) - a benchmark measures `Room` with large participant counts, and polling narrows only if it shows a slope
 - [Route health](/quest/m2/route-health/README.md) - epoch-only active/passive track recovery over metadata-only subscriptions
 - [Wrapper traits over moq-net](/quest/m2/net-wrap/README.md) - moq-net exports producer and consumer traits, and every writer and reader above it takes them, so a wrapper such as e2ee passes through unchanged
 - [E2EE](/quest/m2/e2ee/README.md) - TypeScript and Rust peers interoperate over encrypted broadcasts no relay can decrypt
