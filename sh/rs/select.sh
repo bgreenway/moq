@@ -163,7 +163,6 @@ case "$action" in
         ;;
     fix)
         just rs fix "${flags[@]}"
-        if wants '(moq-wasm|moq-mux|moq-ffi|moq-clock)'; then just rs wasm-fix; fi
         ;;
     test)
         # A selection can hold nothing testable, and
