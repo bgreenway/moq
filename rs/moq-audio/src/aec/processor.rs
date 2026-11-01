@@ -106,6 +106,16 @@ impl Processor {
 	pub fn new(config: Config, render: Stream, capture: Stream) -> Result<Self, Error> {
 		let render_config = render.validate("playback")?;
 		let capture_config = capture.validate("microphone")?;
+
+		// Sonora consumes `rate / 100` samples as each 10 ms frame. At a rate such as
+		// 22,050 Hz that frame is short, so the playback reference would drift against
+		// the microphone. The built-in devices always render at 48 kHz.
+		if !render.sample_rate.is_multiple_of(100) {
+			return Err(Error::Unsupported(format!(
+				"echo cancellation needs a playback sample rate that is a multiple of 100 Hz (got {})",
+				render.sample_rate
+			)));
+		}
 		let inner = build(&config, render_config, capture_config);
 
 		let render_samples = render_config.num_samples();
@@ -393,6 +403,21 @@ mod tests {
 			)
 			.is_err()
 		);
+		assert!(
+			Processor::new(
+				Config::default(),
+				Stream::new(22_050, Layout::Mono),
+				Stream::new(48_000, Layout::Mono),
+			)
+			.is_err()
+		);
+		// A microphone at a device rate such as 22,050 Hz stays accepted.
+		Processor::new(
+			Config::default(),
+			Stream::new(48_000, Layout::Stereo),
+			Stream::new(22_050, Layout::Mono),
+		)
+		.unwrap();
 
 		let mut processor = processor();
 		assert!(processor.process_render(&[0.0, 0.0, 0.0]).is_err());
