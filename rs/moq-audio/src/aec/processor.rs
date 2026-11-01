@@ -12,7 +12,8 @@ const MAX_CALLBACK_FRAMES: usize = 4096;
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[non_exhaustive]
 pub struct Stream {
-	/// Samples per channel per second.
+	/// Samples per channel per second: a multiple of 100 Hz from 8 to 384 kHz,
+	/// so every 10 ms processing frame is a whole number of samples.
 	pub sample_rate: u32,
 	/// Mono or stereo channel layout.
 	pub layout: Layout,
@@ -28,6 +29,14 @@ impl Stream {
 		if !(8_000..=384_000).contains(&self.sample_rate) {
 			return Err(Error::Unsupported(format!(
 				"echo cancellation needs a {role} sample rate between 8 and 384 kHz (got {})",
+				self.sample_rate
+			)));
+		}
+		// Sonora consumes `rate / 100` samples as each 10 ms frame. At a rate such as
+		// 22,050 Hz that frame is short, so the stream would drift against the other.
+		if !self.sample_rate.is_multiple_of(100) {
+			return Err(Error::Unsupported(format!(
+				"echo cancellation needs a {role} sample rate that is a multiple of 100 Hz (got {})",
 				self.sample_rate
 			)));
 		}
@@ -106,16 +115,6 @@ impl Processor {
 	pub fn new(config: Config, render: Stream, capture: Stream) -> Result<Self, Error> {
 		let render_config = render.validate("playback")?;
 		let capture_config = capture.validate("microphone")?;
-
-		// Sonora consumes `rate / 100` samples as each 10 ms frame. At a rate such as
-		// 22,050 Hz that frame is short, so the playback reference would drift against
-		// the microphone. The built-in devices always render at 48 kHz.
-		if !render.sample_rate.is_multiple_of(100) {
-			return Err(Error::Unsupported(format!(
-				"echo cancellation needs a playback sample rate that is a multiple of 100 Hz (got {})",
-				render.sample_rate
-			)));
-		}
 		let inner = build(&config, render_config, capture_config);
 
 		let render_samples = render_config.num_samples();
@@ -411,13 +410,14 @@ mod tests {
 			)
 			.is_err()
 		);
-		// A microphone at a device rate such as 22,050 Hz stays accepted.
-		Processor::new(
-			Config::default(),
-			Stream::new(48_000, Layout::Stereo),
-			Stream::new(22_050, Layout::Mono),
-		)
-		.unwrap();
+		assert!(
+			Processor::new(
+				Config::default(),
+				Stream::new(48_000, Layout::Stereo),
+				Stream::new(22_050, Layout::Mono),
+			)
+			.is_err()
+		);
 
 		let mut processor = processor();
 		assert!(processor.process_render(&[0.0, 0.0, 0.0]).is_err());
